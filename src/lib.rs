@@ -8,6 +8,7 @@ pub struct CPU {
   x_register: u8,
   y_register: u8,
   status_register: StatusRegister,
+  memory: [u8; 0xFFFF],
 }
 
 impl CPU {
@@ -19,6 +20,7 @@ impl CPU {
       x_register: 0,
       y_register: 0,
       status_register: StatusRegister::new(),
+      memory: [0; 0xFFFF],
     }
   }
 
@@ -29,6 +31,7 @@ impl CPU {
     self.x_register = 0;
     self.y_register = 0;
     self.status_register.reset();
+    self.memory = [0; 0xFFFF];
   }
 
   pub fn adc(&mut self, value: u8) {
@@ -37,6 +40,14 @@ impl CPU {
     if carry {
       self.status_register.set_carry_bit();
     }
+  }
+
+  pub fn adc_zero_page(&mut self, index: usize) {
+    if index > 0xFF {
+      panic!("Index {} exceeds max value of {}", index, 0xFF);
+    }
+    let value = self.memory[index];
+    self.adc(value);
   }
 }
 
@@ -53,6 +64,9 @@ mod tests {
     assert_eq!(cpu.status_register.get_register(), 0);
     assert_eq!(cpu.x_register, 0);
     assert_eq!(cpu.y_register, 0);
+    for i in cpu.memory.iter() {
+      assert_eq!(*i, 0);
+    }
   }
 
   #[test]
@@ -64,6 +78,7 @@ mod tests {
     cpu.x_register = 23;
     cpu.y_register = 23;
     cpu.status_register.set_break_bit();
+    cpu.memory = [12; 0xFFFF];
     cpu.reset();
     assert_eq!(cpu.accumulator, 0);
     assert_eq!(cpu.program_counter, 0);
@@ -71,6 +86,9 @@ mod tests {
     assert_eq!(cpu.status_register.get_register(), 0);
     assert_eq!(cpu.x_register, 0);
     assert_eq!(cpu.y_register, 0);
+    for i in cpu.memory.iter() {
+      assert_eq!(*i, 0);
+    }
   }
 
   #[test]
@@ -79,6 +97,7 @@ mod tests {
     cpu.accumulator = 0xAA;
     cpu.adc(0x11);
     assert_eq!(cpu.accumulator, 0xBB);
+    assert_eq!(cpu.status_register.get_register(), 0);
   }
 
   #[test]
@@ -88,5 +107,15 @@ mod tests {
     cpu.adc(0x11);
     assert_eq!(cpu.accumulator, 0x10);
     assert_eq!(cpu.status_register.get_register(), 1);
+  }
+
+  #[test]
+  fn adc_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.memory[0x12] = 10;
+    cpu.accumulator = 0x32;
+    cpu.adc_zero_page(0x12);
+    assert_eq!(cpu.accumulator, 0x32 + 10);
+    assert_eq!(cpu.status_register.get_register(), 0);
   }
 }
