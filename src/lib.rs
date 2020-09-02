@@ -10,24 +10,6 @@ pub struct CPU {
   status_register: StatusRegister,
 }
 
-enum StatusBit {
-  Carry,
-  Zero,
-  Interrupt,
-  Decimal,
-  Break,
-  Overflow,
-  Negative,
-}
-
-impl StatusBit {
-  fn into(self) -> u32 {
-    self as u32
-  }
-}
-
-const BASE: u8 = 2;
-
 impl CPU {
   pub fn new() -> CPU {
     CPU {
