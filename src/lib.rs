@@ -42,12 +42,14 @@ impl CPU {
     }
   }
 
-  pub fn adc_zero_page(&mut self, index: usize) {
-    if index > 0xFF {
-      panic!("Index {} exceeds max value of {}", index, 0xFF);
-    }
-    let value = self.memory[index];
+  pub fn adc_zero_page(&mut self, index: u8) {
+    let value = self.memory[index as usize];
     self.adc(value);
+  }
+
+  pub fn adc_zero_page_indexed(&mut self, operand: u8) {
+    let index = operand.wrapping_add(self.x_register);
+    self.adc_zero_page(index);
   }
 }
 
@@ -116,6 +118,28 @@ mod tests {
     cpu.accumulator = 0x32;
     cpu.adc_zero_page(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 10);
+    assert_eq!(cpu.status_register.get_register(), 0);
+  }
+
+  #[test]
+  fn adc_zero_page_indexed_no_wrap() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x32;
+    cpu.x_register = 0x11;
+    cpu.memory[0x23] = 48;
+    cpu.adc_zero_page_indexed(0x12);
+    assert_eq!(cpu.accumulator, 0x32 + 48);
+    assert_eq!(cpu.status_register.get_register(), 0);
+  }
+
+  #[test]
+  fn adc_zero_page_indexed_wrap() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x32;
+    cpu.x_register = 0x11;
+    cpu.memory[0x10] = 48;
+    cpu.adc_zero_page_indexed(0xFF);
+    assert_eq!(cpu.accumulator, 0x32 + 48);
     assert_eq!(cpu.status_register.get_register(), 0);
   }
 }
