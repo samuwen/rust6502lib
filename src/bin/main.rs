@@ -1,3 +1,6 @@
+use emu_attack::*;
+
 fn main() {
-    println!("Hello, world!");
+    let mut cpu = CPU::new();
+    cpu.reset();
 }
