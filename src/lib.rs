@@ -1,4 +1,5 @@
 mod registers;
+use log::trace;
 use registers::status_register::StatusRegister;
 
 pub struct CPU {
@@ -13,6 +14,7 @@ pub struct CPU {
 
 impl CPU {
   pub fn new() -> CPU {
+    trace!("Initializing CPU");
     CPU {
       program_counter: 0,
       stack_pointer: 0,
@@ -32,27 +34,61 @@ impl CPU {
     self.y_register = 0;
     self.status_register.reset();
     self.memory = [0; 0xFFFF];
+    trace!("CPU Reset")
   }
 
   pub fn adc(&mut self, value: u8) {
+    trace!("ADC called with value: {}", value);
     let (result, carry) = self.accumulator.overflowing_add(value);
     self.accumulator = result;
     if carry {
+      trace!("ADC setting carry bit");
       self.status_register.set_carry_bit();
     }
     if result == 0 {
+      trace!("ADC setting zero bit");
       self.status_register.set_zero_bit();
     }
   }
 
   pub fn adc_zero_page(&mut self, index: u8) {
+    trace!("ADC zero page calld with index: {}", index);
     let value = self.memory[index as usize];
     self.adc(value);
   }
 
   pub fn adc_zero_page_indexed(&mut self, operand: u8) {
+    trace!("ADC zero page indexed called with operand: {}", operand);
     let index = operand.wrapping_add(self.x_register);
     self.adc_zero_page(index);
+  }
+
+  pub fn clc(&mut self) {
+    trace!("CLC called");
+    self.status_register.clear_carry_bit();
+  }
+
+  pub fn cld(&mut self) {
+    trace!("CLD called");
+    self.status_register.clear_decimal_bit();
+  }
+
+  pub fn cli(&mut self) {
+    trace!("CLI called");
+    self.status_register.clear_interrupt_bit();
+  }
+
+  pub fn clv(&mut self) {
+    trace!("CLV called");
+    self.status_register.clear_overflow_bit();
+  }
+
+  pub fn lda(&mut self, value: u8) {
+    trace!("LDA calle with value: {}", value);
+    if value == 0 {
+      self.status_register.set_zero_bit();
+    }
+    self.accumulator = value;
   }
 }
 
@@ -159,5 +195,37 @@ mod tests {
     assert_eq!(cpu.accumulator, 0x32 + 48);
     assert_eq!(cpu.status_register.is_carry_bit_set(), false);
     assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+  }
+
+  #[test]
+  fn clc() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_carry_bit();
+    cpu.clc();
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+  }
+
+  #[test]
+  fn clv() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_overflow_bit();
+    cpu.clv();
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
+  }
+
+  #[test]
+  fn cld() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_decimal_bit();
+    cpu.cld();
+    assert_eq!(cpu.status_register.is_decimal_bit_set(), false);
+  }
+
+  #[test]
+  fn cli() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_interrupt_bit();
+    cpu.cli();
+    assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
   }
 }
