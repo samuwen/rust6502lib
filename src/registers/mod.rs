@@ -1,1 +1,1 @@
-pub mod StatusRegister;
+pub mod status_register;

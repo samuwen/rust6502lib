@@ -1,5 +1,5 @@
 mod registers;
-use registers::StatusRegister::StatusRegister;
+use registers::status_register::StatusRegister;
 
 pub struct CPU {
   program_counter: u16,
@@ -39,6 +39,9 @@ impl CPU {
     self.accumulator = result;
     if carry {
       self.status_register.set_carry_bit();
+    }
+    if result == 0 {
+      self.status_register.set_zero_bit();
     }
   }
 
@@ -94,21 +97,33 @@ mod tests {
   }
 
   #[test]
-  fn adc_no_carry() {
+  fn adc_basic() {
     let mut cpu = CPU::new();
     cpu.accumulator = 0xAA;
     cpu.adc(0x11);
     assert_eq!(cpu.accumulator, 0xBB);
-    assert_eq!(cpu.status_register.get_register(), 0);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
   }
 
   #[test]
-  fn adc_carry() {
+  fn adc_carry_bit() {
     let mut cpu = CPU::new();
     cpu.accumulator = 0xFF;
     cpu.adc(0x11);
     assert_eq!(cpu.accumulator, 0x10);
-    assert_eq!(cpu.status_register.get_register(), 1);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+  }
+
+  #[test]
+  fn adc_zero_bit() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0xFF;
+    cpu.adc(0x01);
+    assert_eq!(cpu.accumulator, 0x00);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
   }
 
   #[test]
@@ -118,7 +133,8 @@ mod tests {
     cpu.accumulator = 0x32;
     cpu.adc_zero_page(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 10);
-    assert_eq!(cpu.status_register.get_register(), 0);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
   }
 
   #[test]
@@ -129,7 +145,8 @@ mod tests {
     cpu.memory[0x23] = 48;
     cpu.adc_zero_page_indexed(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 48);
-    assert_eq!(cpu.status_register.get_register(), 0);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
   }
 
   #[test]
@@ -140,6 +157,7 @@ mod tests {
     cpu.memory[0x10] = 48;
     cpu.adc_zero_page_indexed(0xFF);
     assert_eq!(cpu.accumulator, 0x32 + 48);
-    assert_eq!(cpu.status_register.get_register(), 0);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
   }
 }

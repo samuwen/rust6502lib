@@ -20,7 +20,8 @@ impl StatusRegister {
   }
 
   fn is_bit_set(&self, bit: StatusBit) -> bool {
-    (self.register >> bit.into()) == 1
+    let value = bit.into();
+    (self.register & (BASE.pow(value))) >> value == 1
   }
 
   fn unset_status_register(&mut self, bit: StatusBit) {
@@ -118,6 +119,7 @@ enum StatusBit {
   Interrupt,
   Decimal,
   Break,
+  Unused,
   Overflow,
   Negative,
 }
@@ -248,7 +250,7 @@ mod tests {
   fn set_overflow_bit() {
     let mut reg = StatusRegister::new();
     reg.set_overflow_bit();
-    assert_eq!(reg.register, 32);
+    assert_eq!(reg.register, 64);
   }
 
   #[test]
@@ -261,7 +263,7 @@ mod tests {
   #[test]
   fn unset_overflow_but() {
     let mut reg = StatusRegister::new();
-    reg.register = 32;
+    reg.register = 64;
     reg.clear_overflow_bit();
     assert_eq!(reg.register, 0);
   }
@@ -270,7 +272,7 @@ mod tests {
   fn set_negative_bit() {
     let mut reg = StatusRegister::new();
     reg.set_negative_bit();
-    assert_eq!(reg.register, 64);
+    assert_eq!(reg.register, 128);
   }
 
   #[test]
@@ -283,7 +285,7 @@ mod tests {
   #[test]
   fn unset_negative_but() {
     let mut reg = StatusRegister::new();
-    reg.register = 64;
+    reg.register = 128;
     reg.clear_negative_bit();
     assert_eq!(reg.register, 0);
   }
@@ -298,7 +300,13 @@ mod tests {
     reg.set_overflow_bit();
     reg.set_negative_bit();
     reg.set_zero_bit();
-    assert_eq!(reg.register, 127);
+    assert_eq!(reg.is_carry_bit_set(), true);
+    assert_eq!(reg.is_zero_bit_set(), true);
+    assert_eq!(reg.is_break_bit_set(), true);
+    assert_eq!(reg.is_decimal_bit_set(), true);
+    assert_eq!(reg.is_interrupt_bit_set(), true);
+    assert_eq!(reg.is_overflow_bit_set(), true);
+    assert_eq!(reg.is_negative_bit_set(), true);
   }
 
   #[test]
