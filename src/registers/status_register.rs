@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 pub struct StatusRegister {
   register: u8,
 }
@@ -110,6 +112,16 @@ impl StatusRegister {
 
   pub fn clear_negative_bit(&mut self) {
     self.unset_status_register(StatusBit::Negative);
+  }
+}
+
+impl Display for StatusRegister {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(
+      f,
+      "\n\tCarryBit: {:?}\n\tZeroBit: {:?}\n\tInterruptBit: {:?}\n\tDecimalBit: {:?}\n\tBreakBit: {:?}\n\tOverflowBit: {:?}\n\tNegativeBit: {:?}",
+      self.is_carry_bit_set(), self.is_zero_bit_set(), self.is_interrupt_bit_set(), self.is_decimal_bit_set(), self.is_break_bit_set(), self.is_overflow_bit_set(), self.is_negative_bit_set()
+    )
   }
 }
 

@@ -1,6 +1,7 @@
 mod registers;
 use log::trace;
 use registers::status_register::StatusRegister;
+use std::fmt::{Display, Formatter, Result};
 
 pub struct CPU {
   program_counter: u16,
@@ -38,7 +39,7 @@ impl CPU {
   }
 
   pub fn adc(&mut self, value: u8) {
-    trace!("ADC called with value: {}", value);
+    trace!("ADC called with value: 0x{:X}", value);
     let (result, carry) = self.accumulator.overflowing_add(value);
     self.accumulator = result;
     if carry {
@@ -52,13 +53,13 @@ impl CPU {
   }
 
   pub fn adc_zero_page(&mut self, index: u8) {
-    trace!("ADC zero page calld with index: {}", index);
+    trace!("ADC zero page calld with index: 0x{:X}", index);
     let value = self.memory[index as usize];
     self.adc(value);
   }
 
   pub fn adc_zero_page_indexed(&mut self, operand: u8) {
-    trace!("ADC zero page indexed called with operand: {}", operand);
+    trace!("ADC zero page indexed called with operand: 0x{:X}", operand);
     let index = operand.wrapping_add(self.x_register);
     self.adc_zero_page(index);
   }
@@ -84,11 +85,21 @@ impl CPU {
   }
 
   pub fn lda(&mut self, value: u8) {
-    trace!("LDA calle with value: {}", value);
+    trace!("LDA called with value: 0x{:X}", value);
     if value == 0 {
       self.status_register.set_zero_bit();
     }
     self.accumulator = value;
+  }
+}
+
+impl Display for CPU {
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    write!(
+      f,
+      "program_counter: 0x{:X}\nstack_pointer: 0x{:X}\naccumulator: 0x{:X}\nstatus_register: {}\nx_register: 0x{:X}\ny_register: 0x{:X}\n",
+      self.program_counter, self.stack_pointer, self.accumulator, self.status_register, self.x_register, self.y_register
+    )
   }
 }
 
