@@ -23,20 +23,30 @@ fn main() {
         match string[0] {
             "exit" => break,
             "lda" => {
-                let mut iter = string[1].chars();
-                match iter.next().unwrap() {
-                    '#' => {
-                        let parsed = parse_immediate(&mut iter);
-                        cpu.lda(parsed);
-                    }
-                    _ => (),
-                }
+                handle_input(&mut cpu, CPU::lda, string[1]);
+            }
+            "adc" => {
+                handle_input(&mut cpu, CPU::adc, string[1]);
             }
             "print" => println!("{}", cpu),
             "reset" => cpu.reset(),
             _ => println!("Invalid input. Try another command"),
         }
         buffer = String::new();
+    }
+}
+
+fn handle_input<F>(cpu: &mut CPU, mut f: F, values: &str)
+where
+    F: FnMut(&mut CPU, u8),
+{
+    let mut iter = values.chars();
+    match iter.next().unwrap() {
+        '#' => {
+            let parsed = parse_immediate(&mut iter);
+            f(cpu, parsed);
+        }
+        _ => (),
     }
 }
 
