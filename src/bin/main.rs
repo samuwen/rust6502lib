@@ -27,6 +27,10 @@ fn main() {
                 "print" => println!("{}", cpu),
                 "reset" => cpu.reset(),
                 "exit" => break,
+                "clc" => cpu.clc(),
+                "cld" => cpu.cld(),
+                "cli" => cpu.cli(),
+                "clv" => cpu.clv(),
                 _ => println!("{}", error_message),
             },
             _ => {
@@ -39,6 +43,8 @@ fn main() {
                     },
                     "adc" => match mode.as_ref() {
                         "immediate" => cpu.adc(parse_immediate(&mut iter)),
+                        "zero page" => cpu.adc_zero_page(parse_zero_page(&mut iter)),
+                        "zero page x" => cpu.adc_zero_page_indexed(parse_zero_page_x(&mut iter)),
                         _ => (),
                     },
                     _ => println!("{}", error_message),
@@ -54,9 +60,29 @@ where
     I: Iterator<Item = char>,
 {
     // drop the #$
-    iter.next().unwrap();
-    iter.next().unwrap();
+    let iter = iter.skip(2);
     let digits: String = iter.collect();
+    u8::from_str_radix(&digits, 16).unwrap()
+}
+
+fn parse_zero_page<'a, I>(iter: &mut I) -> u8
+where
+    I: Iterator<Item = char>,
+{
+    // drop the $
+    let iter = iter.skip(1);
+    let digits: String = iter.collect();
+    u8::from_str_radix(&digits, 16).unwrap()
+}
+
+fn parse_zero_page_x<'a, I>(iter: &mut I) -> u8
+where
+    I: Iterator<Item = char>,
+{
+    // drop the $
+    let iter = iter.skip(1);
+    let digiterator = iter.take(2);
+    let digits: String = digiterator.collect();
     u8::from_str_radix(&digits, 16).unwrap()
 }
 
