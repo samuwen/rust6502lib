@@ -38,36 +38,22 @@ impl CPU {
     trace!("CPU Reset")
   }
 
+  /// Adds the value given to the accumulator
+  ///
+  /// Affects flags N V Z C
   pub fn adc(&mut self, value: u8) {
-    trace!("ADC called with value: 0x{:X}", value);
-    let (result, carry) = self.accumulator.overflowing_add(value);
+    let message = "ADC";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let modifier = match self.status_register.is_carry_bit_set() {
+      true => 1,
+      false => 0,
+    };
+    let (result, carry) = self.accumulator.overflowing_add(value + modifier);
     self.accumulator = result;
-    if result > 0x7F {
-      trace!("ADC setting overflow bit");
-      self.status_register.set_overflow_bit();
-    } else {
-      if self.status_register.is_carry_bit_set() {
-        if result + 1 > 0x7F {
-          trace!("ADC setting overflow bit");
-          self.status_register.set_overflow_bit();
-        }
-      }
-    }
-    if carry {
-      trace!("ADC setting carry bit");
-      self.status_register.set_carry_bit();
-      if result < 0x80 {
-        trace!("ADC setting overflow bit");
-        self.status_register.set_overflow_bit();
-      }
-    } else {
-      trace!("ADC clearing carry bit");
-      self.status_register.clear_carry_bit();
-    }
-    if result == 0 {
-      trace!("ADC setting zero bit");
-      self.status_register.set_zero_bit();
-    }
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_v_flag(result, message, carry);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_c_flag(message, carry);
   }
 
   pub fn adc_zero_page(&mut self, index: u8) {
@@ -117,12 +103,15 @@ impl CPU {
     self.status_register.clear_overflow_bit();
   }
 
+  /// Loads the accumulator with the value given
+  ///
+  /// Affects flags N Z
   pub fn lda(&mut self, value: u8) {
-    trace!("LDA called with value: 0x{:X}", value);
-    if value == 0 {
-      self.status_register.set_zero_bit();
-    }
+    let message = "LDA";
+    trace!("{} called with value: 0x{:X}", message, value);
     self.accumulator = value;
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
   }
 }
 
@@ -187,7 +176,16 @@ mod tests {
   }
 
   #[test]
-  fn adc_carry_bit() {
+  fn adc_with_carry() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x00;
+    cpu.status_register.set_carry_bit();
+    cpu.adc(0x11);
+    assert_eq!(cpu.accumulator, 0x12);
+  }
+
+  #[test]
+  fn adc_set_carry_bit() {
     let mut cpu = CPU::new();
     cpu.accumulator = 0xFF;
     cpu.adc(0x11);
@@ -204,6 +202,26 @@ mod tests {
     assert_eq!(cpu.accumulator, 0x00);
     assert_eq!(cpu.status_register.is_carry_bit_set(), true);
     assert_eq!(cpu.status_register.is_zero_bit_set(), true);
+  }
+
+  #[test]
+  fn adc_overflow() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x7F;
+    cpu.adc(0x01);
+    assert_eq!(cpu.accumulator, 0x80);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
+  }
+
+  #[test]
+  fn adc_overflow_negative() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x80;
+    cpu.adc(0xFF);
+    assert_eq!(cpu.accumulator, 0x7F);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
   }
 
   #[test]

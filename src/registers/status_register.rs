@@ -1,3 +1,4 @@
+use log::trace;
 use std::fmt::{Display, Formatter};
 
 pub struct StatusRegister {
@@ -13,6 +14,7 @@ impl StatusRegister {
     self.register = 0;
   }
 
+  #[allow(dead_code)]
   pub fn get_register(&self) -> u8 {
     self.register
   }
@@ -112,6 +114,46 @@ impl StatusRegister {
 
   pub fn clear_negative_bit(&mut self) {
     self.unset_status_register(StatusBit::Negative);
+  }
+
+  pub fn handle_c_flag(&mut self, message: &str, carry: bool) {
+    if carry {
+      trace!("{} setting carry bit", message);
+      self.set_carry_bit();
+    } else {
+      trace!("{} clearing carry bit", message);
+      self.clear_carry_bit();
+    }
+  }
+
+  pub fn handle_v_flag(&mut self, value: u8, message: &str, carry: bool) {
+    if value > 0x7F {
+      trace!("{} setting overflow bit", message);
+      self.set_overflow_bit();
+    } else if value == 0x7F && carry {
+      trace!("{} setting overflow bit", message);
+      self.set_overflow_bit();
+    }
+  }
+
+  pub fn handle_n_flag(&mut self, value: u8, message: &str) {
+    if value >> 7 == 1 {
+      trace!("{} setting negative bit", message);
+      self.set_negative_bit();
+    } else {
+      trace!("{} clearing negative bit", message);
+      self.clear_negative_bit();
+    }
+  }
+
+  pub fn handle_z_flag(&mut self, value: u8, message: &str) {
+    if value == 0 {
+      trace!("{} setting zero bit", message);
+      self.set_zero_bit();
+    } else {
+      trace!("{} clearing zero bit", message);
+      self.clear_zero_bit();
+    }
   }
 }
 
@@ -333,5 +375,64 @@ mod tests {
     reg.set_zero_bit();
     reg.reset();
     assert_eq!(reg.register, 0);
+  }
+
+  #[test]
+  fn handle_carry_set() {
+    let mut reg = StatusRegister::new();
+    reg.handle_c_flag("test", true);
+    assert_eq!(reg.is_carry_bit_set(), true);
+  }
+
+  #[test]
+  fn handle_carry_clear() {
+    let mut reg = StatusRegister::new();
+    reg.set_carry_bit();
+    reg.handle_c_flag("test", false);
+    assert_eq!(reg.is_carry_bit_set(), false);
+  }
+
+  #[test]
+  fn handle_overflow_set() {
+    let mut reg = StatusRegister::new();
+    reg.handle_v_flag(0x80, "test", false);
+    assert_eq!(reg.is_overflow_bit_set(), true);
+  }
+
+  #[test]
+  fn handle_overflow_set_carry() {
+    let mut reg = StatusRegister::new();
+    reg.handle_v_flag(0x7F, "test", true);
+    assert_eq!(reg.is_overflow_bit_set(), true);
+  }
+
+  #[test]
+  fn handle_zero_set() {
+    let mut reg = StatusRegister::new();
+    reg.handle_z_flag(0x0, "test");
+    assert_eq!(reg.is_zero_bit_set(), true);
+  }
+
+  #[test]
+  fn handle_zero_clear() {
+    let mut reg = StatusRegister::new();
+    reg.set_zero_bit();
+    reg.handle_z_flag(0x1, "test");
+    assert_eq!(reg.is_zero_bit_set(), false);
+  }
+
+  #[test]
+  fn handle_negative_set() {
+    let mut reg = StatusRegister::new();
+    reg.handle_n_flag(0x80, "test");
+    assert_eq!(reg.is_negative_bit_set(), true);
+  }
+
+  #[test]
+  fn handle_negative_clear() {
+    let mut reg = StatusRegister::new();
+    reg.set_negative_bit();
+    reg.handle_n_flag(0x1, "test");
+    assert_eq!(reg.is_negative_bit_set(), false);
   }
 }
