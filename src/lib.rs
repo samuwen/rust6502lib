@@ -42,9 +42,27 @@ impl CPU {
     trace!("ADC called with value: 0x{:X}", value);
     let (result, carry) = self.accumulator.overflowing_add(value);
     self.accumulator = result;
+    if result > 0x7F {
+      trace!("ADC setting overflow bit");
+      self.status_register.set_overflow_bit();
+    } else {
+      if self.status_register.is_carry_bit_set() {
+        if result + 1 > 0x7F {
+          trace!("ADC setting overflow bit");
+          self.status_register.set_overflow_bit();
+        }
+      }
+    }
     if carry {
       trace!("ADC setting carry bit");
       self.status_register.set_carry_bit();
+      if result < 0x80 {
+        trace!("ADC setting overflow bit");
+        self.status_register.set_overflow_bit();
+      }
+    } else {
+      trace!("ADC clearing carry bit");
+      self.status_register.clear_carry_bit();
     }
     if result == 0 {
       trace!("ADC setting zero bit");
