@@ -68,6 +68,12 @@ impl CPU {
     self.adc_zero_page(index);
   }
 
+  pub fn adc_absolute(&mut self, index: u16) {
+    trace!("ADC absolute called with index: 0x{:X}", index);
+    let value = self.memory[index as usize];
+    self.adc(value);
+  }
+
   pub fn clc(&mut self) {
     trace!("CLC called");
     self.status_register.clear_carry_bit();
@@ -170,9 +176,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.accumulator = 0xAA;
     cpu.adc(0x11);
-    assert_eq!(cpu.accumulator, 0xBB);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+    assert_eq!(cpu.accumulator, 0xAA + 0x11);
   }
 
   #[test]
@@ -185,54 +189,12 @@ mod tests {
   }
 
   #[test]
-  fn adc_set_carry_bit() {
-    let mut cpu = CPU::new();
-    cpu.accumulator = 0xFF;
-    cpu.adc(0x11);
-    assert_eq!(cpu.accumulator, 0x10);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
-  }
-
-  #[test]
-  fn adc_zero_bit() {
-    let mut cpu = CPU::new();
-    cpu.accumulator = 0xFF;
-    cpu.adc(0x01);
-    assert_eq!(cpu.accumulator, 0x00);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
-  }
-
-  #[test]
-  fn adc_overflow() {
-    let mut cpu = CPU::new();
-    cpu.accumulator = 0x7F;
-    cpu.adc(0x01);
-    assert_eq!(cpu.accumulator, 0x80);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
-  }
-
-  #[test]
-  fn adc_overflow_negative() {
-    let mut cpu = CPU::new();
-    cpu.accumulator = 0x80;
-    cpu.adc(0xFF);
-    assert_eq!(cpu.accumulator, 0x7F);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
-  }
-
-  #[test]
   fn adc_zero_page() {
     let mut cpu = CPU::new();
     cpu.memory[0x12] = 10;
     cpu.accumulator = 0x32;
     cpu.adc_zero_page(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 10);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
   }
 
   #[test]
@@ -243,8 +205,6 @@ mod tests {
     cpu.memory[0x23] = 48;
     cpu.adc_zero_page_indexed(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 48);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
   }
 
   #[test]
@@ -255,8 +215,15 @@ mod tests {
     cpu.memory[0x10] = 48;
     cpu.adc_zero_page_indexed(0xFF);
     assert_eq!(cpu.accumulator, 0x32 + 48);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+  }
+
+  #[test]
+  fn adc_absolute() {
+    let mut cpu = CPU::new();
+    cpu.memory[0x1234] = 0x56;
+    cpu.accumulator = 0x10;
+    cpu.adc_absolute(0x1234);
+    assert_eq!(cpu.accumulator, 0x56 + 0x10);
   }
 
   #[test]
