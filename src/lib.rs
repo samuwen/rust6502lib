@@ -69,14 +69,29 @@ impl CPU {
     self.status_register.clear_carry_bit();
   }
 
+  pub fn sec(&mut self) {
+    trace!("SEC called");
+    self.status_register.set_carry_bit();
+  }
+
   pub fn cld(&mut self) {
     trace!("CLD called");
     self.status_register.clear_decimal_bit();
   }
 
+  pub fn sed(&mut self) {
+    trace!("SED called");
+    self.status_register.set_decimal_bit();
+  }
+
   pub fn cli(&mut self) {
     trace!("CLI called");
     self.status_register.clear_interrupt_bit();
+  }
+
+  pub fn sei(&mut self) {
+    trace!("SEI called");
+    self.status_register.set_interrupt_bit();
   }
 
   pub fn clv(&mut self) {
@@ -217,6 +232,13 @@ mod tests {
   }
 
   #[test]
+  fn sec() {
+    let mut cpu = CPU::new();
+    cpu.sec();
+    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
+  }
+
+  #[test]
   fn clv() {
     let mut cpu = CPU::new();
     cpu.status_register.set_overflow_bit();
@@ -233,10 +255,24 @@ mod tests {
   }
 
   #[test]
+  fn sed() {
+    let mut cpu = CPU::new();
+    cpu.sed();
+    assert_eq!(cpu.status_register.is_decimal_bit_set(), true);
+  }
+
+  #[test]
   fn cli() {
     let mut cpu = CPU::new();
     cpu.status_register.set_interrupt_bit();
     cpu.cli();
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
+  }
+
+  #[test]
+  fn sei() {
+    let mut cpu = CPU::new();
+    cpu.sei();
+    assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
   }
 }
