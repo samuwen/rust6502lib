@@ -20,33 +20,32 @@ fn main() {
             .expect("Failed to capture input");
         buffer.make_ascii_lowercase();
         let string: Vec<_> = buffer.trim().split(' ').collect();
-        match string[0] {
-            "exit" => break,
-            "lda" => {
-                handle_input(&mut cpu, CPU::lda, string[1]);
+        let error_message = "Invalid input. Try another command";
+        match string.len() {
+            0 => println!("{}", error_message),
+            1 => match string[0] {
+                "print" => println!("{}", cpu),
+                "reset" => cpu.reset(),
+                "exit" => break,
+                _ => println!("{}", error_message),
+            },
+            _ => {
+                let mode = determine_mode(string[1]);
+                let mut iter = string[1].chars();
+                match string[0] {
+                    "lda" => match mode.as_ref() {
+                        "immediate" => cpu.lda(parse_immediate(&mut iter)),
+                        _ => (),
+                    },
+                    "adc" => match mode.as_ref() {
+                        "immediate" => cpu.adc(parse_immediate(&mut iter)),
+                        _ => (),
+                    },
+                    _ => println!("{}", error_message),
+                }
             }
-            "adc" => {
-                handle_input(&mut cpu, CPU::adc, string[1]);
-            }
-            "print" => println!("{}", cpu),
-            "reset" => cpu.reset(),
-            _ => println!("Invalid input. Try another command"),
         }
         buffer = String::new();
-    }
-}
-
-fn handle_input<F>(cpu: &mut CPU, mut f: F, values: &str)
-where
-    F: FnMut(&mut CPU, u8),
-{
-    let mut iter = values.chars();
-    match iter.next().unwrap() {
-        '#' => {
-            let parsed = parse_immediate(&mut iter);
-            f(cpu, parsed);
-        }
-        _ => (),
     }
 }
 
@@ -54,7 +53,32 @@ fn parse_immediate<'a, I>(iter: &mut I) -> u8
 where
     I: Iterator<Item = char>,
 {
+    // drop the #$
+    iter.next().unwrap();
     iter.next().unwrap();
     let digits: String = iter.collect();
     u8::from_str_radix(&digits, 16).unwrap()
+}
+
+fn determine_mode(string: &str) -> String {
+    let result = match string.len() {
+        3 => "zero page",
+        4 => "immediate",
+        5 => match string.find('X') {
+            Some(_) => "zero page x",
+            None => "absolute",
+        },
+        7 => match string.find('(') {
+            Some(_) => match string.find('X') {
+                Some(_) => "Indirect X",
+                None => "Indirect Y",
+            },
+            None => match string.find('X') {
+                Some(_) => "Absolute X",
+                None => "Absolute Y",
+            },
+        },
+        _ => "Invalid value",
+    };
+    String::from(result)
 }
