@@ -2,6 +2,8 @@ use emu_attack::*;
 use flexi_logger::{opt_format, Logger};
 use std::io::{self, stdout, Write};
 
+const BASE_RADIX: u32 = 16;
+
 fn main() {
     Logger::with_env_or_str("trace")
         .log_to_file()
@@ -47,6 +49,9 @@ fn main() {
                         "immediate" => cpu.adc(parse_immediate(&mut iter)),
                         "zero page" => cpu.adc_zero_page(parse_zero_page(&mut iter)),
                         "zero page x" => cpu.adc_zero_page_indexed(parse_zero_page_x(&mut iter)),
+                        "absolute" | "absolute x" | "absolute y" => {
+                            cpu.adc_absolute(parse_absolute(&mut iter))
+                        }
                         _ => (),
                     },
                     _ => println!("{}", error_message),
@@ -64,7 +69,7 @@ where
     // drop the #$
     let iter = iter.skip(2);
     let digits: String = iter.collect();
-    u8::from_str_radix(&digits, 16).unwrap()
+    u8::from_str_radix(&digits, BASE_RADIX).unwrap()
 }
 
 fn parse_zero_page<'a, I>(iter: &mut I) -> u8
@@ -74,7 +79,7 @@ where
     // drop the $
     let iter = iter.skip(1);
     let digits: String = iter.collect();
-    u8::from_str_radix(&digits, 16).unwrap()
+    u8::from_str_radix(&digits, BASE_RADIX).unwrap()
 }
 
 fn parse_zero_page_x<'a, I>(iter: &mut I) -> u8
@@ -85,7 +90,25 @@ where
     let iter = iter.skip(1);
     let digiterator = iter.take(2);
     let digits: String = digiterator.collect();
-    u8::from_str_radix(&digits, 16).unwrap()
+    u8::from_str_radix(&digits, BASE_RADIX).unwrap()
+}
+
+fn parse_absolute<'a, I>(iter: &mut I) -> u16
+where
+    I: Iterator<Item = char>,
+{
+    let iter = iter.skip(1);
+    let mut first_two = String::new();
+    let mut last_two = String::new();
+    for (i, cha) in iter.enumerate() {
+        if i < 2 {
+            first_two.push(cha);
+        } else {
+            last_two.push(cha);
+        }
+    }
+    last_two.push_str(first_two.as_ref());
+    u16::from_str_radix(&last_two, BASE_RADIX).unwrap()
 }
 
 fn determine_mode(string: &str) -> String {
@@ -98,12 +121,12 @@ fn determine_mode(string: &str) -> String {
         },
         7 => match string.find('(') {
             Some(_) => match string.find('X') {
-                Some(_) => "Indirect X",
-                None => "Indirect Y",
+                Some(_) => "indirect X",
+                None => "indirect Y",
             },
             None => match string.find('X') {
-                Some(_) => "Absolute X",
-                None => "Absolute Y",
+                Some(_) => "absolute X",
+                None => "absolute Y",
             },
         },
         _ => "Invalid value",

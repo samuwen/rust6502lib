@@ -1,5 +1,8 @@
+mod memory;
 mod registers;
+
 use log::trace;
+use memory::Memory;
 use registers::status_register::StatusRegister;
 use std::fmt::{Display, Formatter, Result};
 
@@ -10,7 +13,7 @@ pub struct CPU {
   x_register: u8,
   y_register: u8,
   status_register: StatusRegister,
-  memory: [u8; 0xFFFF],
+  memory: Memory,
 }
 
 impl CPU {
@@ -23,7 +26,7 @@ impl CPU {
       x_register: 0,
       y_register: 0,
       status_register: StatusRegister::new(),
-      memory: [0; 0xFFFF],
+      memory: Memory::new(),
     }
   }
 
@@ -34,7 +37,7 @@ impl CPU {
     self.x_register = 0;
     self.y_register = 0;
     self.status_register.reset();
-    self.memory = [0; 0xFFFF];
+    self.memory.reset();
     trace!("CPU Reset")
   }
 
@@ -58,7 +61,7 @@ impl CPU {
 
   pub fn adc_zero_page(&mut self, index: u8) {
     trace!("ADC zero page calld with index: 0x{:X}", index);
-    let value = self.memory[index as usize];
+    let value = self.memory.get_zero_page(index);
     self.adc(value);
   }
 
@@ -70,7 +73,33 @@ impl CPU {
 
   pub fn adc_absolute(&mut self, index: u16) {
     trace!("ADC absolute called with index: 0x{:X}", index);
-    let value = self.memory[index as usize];
+    let value = self.memory.get_u16(index);
+    self.adc(value);
+  }
+
+  pub fn adc_absolute_x(&mut self, index: u16) {
+    trace!("ADC absolute x called with index: 0x{:X}", index);
+    let value = self.memory.get_u16_and_register(index, self.x_register);
+    self.adc(value);
+  }
+
+  pub fn adc_absolute_y(&mut self, index: u16) {
+    trace!("ADC absolute y called with index: 0x{:X}", index);
+    let value = self.memory.get_u16_and_register(index, self.y_register);
+    self.adc(value);
+  }
+
+  /// AKA Indexed indirect AKA pre-indexed
+  pub fn adc_indexed_x(&mut self, operand: u8) {
+    trace!("ADC indexed x called with operand: 0x{:X}", operand);
+    let value = self.memory.get_pre_indexed_data(operand, self.x_register);
+    self.adc(value);
+  }
+
+  /// AKA Indirect indexed AKA post-indexed
+  pub fn adc_indexed_y(&mut self, operand: u8) {
+    trace!("ADC indexed y called with operand: 0x{:X}", operand);
+    let value = self.memory.get_post_indexed_data(operand, self.y_register);
     self.adc(value);
   }
 
@@ -141,12 +170,8 @@ mod tests {
     assert_eq!(cpu.accumulator, 0);
     assert_eq!(cpu.program_counter, 0);
     assert_eq!(cpu.stack_pointer, 0);
-    assert_eq!(cpu.status_register.get_register(), 0);
     assert_eq!(cpu.x_register, 0);
     assert_eq!(cpu.y_register, 0);
-    for i in cpu.memory.iter() {
-      assert_eq!(*i, 0);
-    }
   }
 
   #[test]
@@ -158,17 +183,12 @@ mod tests {
     cpu.x_register = 23;
     cpu.y_register = 23;
     cpu.status_register.set_break_bit();
-    cpu.memory = [12; 0xFFFF];
     cpu.reset();
     assert_eq!(cpu.accumulator, 0);
     assert_eq!(cpu.program_counter, 0);
     assert_eq!(cpu.stack_pointer, 0);
-    assert_eq!(cpu.status_register.get_register(), 0);
     assert_eq!(cpu.x_register, 0);
     assert_eq!(cpu.y_register, 0);
-    for i in cpu.memory.iter() {
-      assert_eq!(*i, 0);
-    }
   }
 
   #[test]
@@ -191,7 +211,7 @@ mod tests {
   #[test]
   fn adc_zero_page() {
     let mut cpu = CPU::new();
-    cpu.memory[0x12] = 10;
+    cpu.memory.set(0x12, 10);
     cpu.accumulator = 0x32;
     cpu.adc_zero_page(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 10);
@@ -202,7 +222,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.accumulator = 0x32;
     cpu.x_register = 0x11;
-    cpu.memory[0x23] = 48;
+    cpu.memory.set(0x23, 48);
     cpu.adc_zero_page_indexed(0x12);
     assert_eq!(cpu.accumulator, 0x32 + 48);
   }
@@ -212,7 +232,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.accumulator = 0x32;
     cpu.x_register = 0x11;
-    cpu.memory[0x10] = 48;
+    cpu.memory.set(0x10, 48);
     cpu.adc_zero_page_indexed(0xFF);
     assert_eq!(cpu.accumulator, 0x32 + 48);
   }
@@ -220,10 +240,30 @@ mod tests {
   #[test]
   fn adc_absolute() {
     let mut cpu = CPU::new();
-    cpu.memory[0x1234] = 0x56;
+    cpu.memory.set(0x1234, 0x56);
     cpu.accumulator = 0x10;
     cpu.adc_absolute(0x1234);
     assert_eq!(cpu.accumulator, 0x56 + 0x10);
+  }
+
+  #[test]
+  fn adc_absolute_x() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x1234 + 0x56, 0x56);
+    cpu.x_register = 0x56;
+    cpu.accumulator = 0x10;
+    cpu.adc_absolute_x(0x1234);
+    assert_eq!(cpu.accumulator, 0x56 + 0x10);
+  }
+
+  #[test]
+  fn adc_absolute_y() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x5678 + 0x12, 0x90);
+    cpu.y_register = 0x12;
+    cpu.accumulator = 0xA0;
+    cpu.adc_absolute_y(0x5678);
+    assert_eq!(cpu.accumulator, 0x30);
   }
 
   #[test]

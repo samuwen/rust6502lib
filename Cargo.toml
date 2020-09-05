@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 log = "0.4.11"
 flexi_logger = "0.15.12"
+hex = "0.4.2"
