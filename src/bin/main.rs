@@ -52,6 +52,9 @@ fn main() {
                         "absolute" | "absolute x" | "absolute y" => {
                             cpu.adc_absolute(parse_absolute(&mut iter))
                         }
+                        // after removing two chars, the next 2 chars are the operand
+                        "indirect x" => cpu.adc_indexed_x(parse_immediate(&mut iter)),
+                        "indirect y" => cpu.adc_indexed_y(parse_immediate(&mut iter)),
                         _ => (),
                     },
                     _ => println!("{}", error_message),
