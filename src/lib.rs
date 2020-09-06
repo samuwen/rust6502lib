@@ -351,6 +351,31 @@ impl CPU {
   pub fn ldx_absolute_y(&mut self, index: u16) {
     self.generic_abs_y(index, "LDX", &mut CPU::ldx);
   }
+
+  pub fn ldy(&mut self, value: u8) {
+    let message = "LDY";
+    trace!("{} called with value: 0x{:X}", message, value);
+    self.y_register.set(value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
+    self.program_counter.advance(2);
+  }
+
+  pub fn ldy_zero_page(&mut self, index: u8) {
+    self.generic_zero_page(index, "LDY", &mut CPU::ldy);
+  }
+
+  pub fn ldy_zero_page_x(&mut self, index: u8) {
+    self.generic_zero_page_x(index, "LDY", &mut CPU::ldy_zero_page);
+  }
+
+  pub fn ldy_absolute(&mut self, index: u16) {
+    self.generic_absolute(index, "LDY", &mut CPU::ldy);
+  }
+
+  pub fn ldy_absolute_x(&mut self, index: u16) {
+    self.generic_abs_x(index, "LDY", &mut CPU::ldy);
+  }
 }
 
 impl Display for CPU {
@@ -623,6 +648,47 @@ mod tests {
     cpu.y_register.set(0x20);
     cpu.ldx_absolute_y(0x1234);
     assert_eq!(cpu.x_register.get(), 0x56);
+  }
+
+  #[test]
+  fn ldy() {
+    let mut cpu = CPU::new();
+    cpu.ldy(0x11);
+    assert_eq!(cpu.y_register.get(), 0x11);
+  }
+
+  #[test]
+  fn ldy_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x39, 0x11);
+    cpu.ldy_zero_page(0x39);
+    assert_eq!(cpu.y_register.get(), 0x11);
+  }
+
+  #[test]
+  fn ldy_zero_page_x() {
+    let mut cpu = CPU::new();
+    cpu.x_register.set(0x75);
+    cpu.memory.set_zero_page(0x32 + 0x75, 0x12);
+    cpu.ldy_zero_page_x(0x32);
+    assert_eq!(cpu.y_register.get(), 0x12);
+  }
+
+  #[test]
+  fn ldy_absolute() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x1234, 0x56);
+    cpu.ldy_absolute(0x1234);
+    assert_eq!(cpu.y_register.get(), 0x56);
+  }
+
+  #[test]
+  fn ldy_absolute_x() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x1254, 0x56);
+    cpu.x_register.set(0x20);
+    cpu.ldy_absolute_x(0x1234);
+    assert_eq!(cpu.y_register.get(), 0x56);
   }
 
   #[test]
