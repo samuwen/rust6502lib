@@ -1,5 +1,5 @@
 use emu_attack::*;
-use flexi_logger::{opt_format, Logger};
+use flexi_logger::{default_format, Logger};
 use std::io::{self, stdout, Write};
 
 const BASE_RADIX: u32 = 16;
@@ -8,7 +8,8 @@ fn main() {
     Logger::with_env_or_str("trace")
         .log_to_file()
         .directory("log_files")
-        .format(opt_format)
+        .duplicate_to_stdout(flexi_logger::Duplicate::All)
+        .format(default_format)
         .start()
         .unwrap();
     let mut cpu = CPU::new();
