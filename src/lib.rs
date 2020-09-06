@@ -138,7 +138,9 @@ impl CPU {
   }
 
   pub fn sta_indexed_y(&mut self, operand: u8) {
-    let index = self.memory.get_pre_adjusted_index(operand, self.y_register);
+    let index = self
+      .memory
+      .get_post_adjusted_index(operand, self.y_register);
     trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
     self.memory.set(index, self.accumulator);
   }
@@ -365,10 +367,10 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.accumulator = 0x45;
     cpu.y_register = 0x20;
-    cpu.memory.set(0x76, 0x57);
-    cpu.memory.set(0x77, 0xCB);
+    cpu.memory.set(0x12, 0x57);
+    cpu.memory.set(0x13, 0xCB);
     cpu.sta_indexed_y(0x12);
-    assert_eq!(cpu.memory.get_u16(0xCB69), 0x45);
+    assert_eq!(cpu.memory.get_u16(0xCB77), 0x45);
   }
 
   #[test]

@@ -58,14 +58,14 @@ impl Memory {
   /// to the address, then returns the index.
   pub fn get_post_indexed_data(&self, operand: u8, register: u8) -> u8 {
     let index = self.get_post_adjusted_index(operand, register);
-    self.mem[(index + register as u16) as usize]
+    self.mem[index as usize]
   }
 
   pub fn get_post_adjusted_index(&self, operand: u8, register: u8) -> u16 {
     let mut lsb = self.get_lsb(operand);
     let msb = self.get_msb(operand);
     lsb.push_str(&msb);
-    u16::from_str_radix(&lsb, 16).unwrap()
+    u16::from_str_radix(&lsb, 16).unwrap() + register as u16
   }
 
   pub fn get_msb(&self, index: u8) -> String {
@@ -160,7 +160,7 @@ mod tests {
     let mut memory = Memory::new();
     memory.mem[0x86] = 0x28;
     memory.mem[0x87] = 0x40;
-    assert_eq!(memory.get_post_adjusted_index(0x86, 0x10), 0x4028);
+    assert_eq!(memory.get_post_adjusted_index(0x86, 0x10), 0x4038);
   }
 
   #[test]

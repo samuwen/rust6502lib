@@ -41,20 +41,33 @@ fn main() {
                 let mode = determine_mode(string[1]);
                 let mut iter = string[1].chars();
                 match string[0] {
-                    "lda" => match mode.as_ref() {
-                        "immediate" => cpu.lda(parse_immediate(&mut iter)),
+                    "lda" => match mode {
+                        AddressMode::Immediate => cpu.lda(parse_immediate(&mut iter)),
+                        AddressMode::Invalid => println!("Invalid LDA request syntax"),
                         _ => (),
                     },
-                    "adc" => match mode.as_ref() {
-                        "immediate" => cpu.adc(parse_immediate(&mut iter)),
-                        "zero page" => cpu.adc_zero_page(parse_zero_page(&mut iter)),
-                        "zero page x" => cpu.adc_zero_page_indexed(parse_zero_page_x(&mut iter)),
-                        "absolute" | "absolute x" | "absolute y" => {
-                            cpu.adc_absolute(parse_absolute(&mut iter))
+                    "adc" => match mode {
+                        AddressMode::Immediate => cpu.adc(parse_immediate(&mut iter)),
+                        AddressMode::ZeroPage => cpu.adc_zero_page(parse_zero_page(&mut iter)),
+                        AddressMode::ZeroPageX => {
+                            cpu.adc_zero_page_indexed(parse_zero_page_x(&mut iter))
                         }
-                        // after removing two chars, the next 2 chars are the operand
-                        "indirect x" => cpu.adc_indexed_x(parse_immediate(&mut iter)),
-                        "indirect y" => cpu.adc_indexed_y(parse_immediate(&mut iter)),
+                        AddressMode::Absolute => cpu.adc_absolute(parse_absolute(&mut iter)),
+                        AddressMode::AbsoluteX => cpu.adc_absolute_x(parse_absolute(&mut iter)),
+                        AddressMode::AbsoluteY => cpu.adc_absolute_y(parse_absolute(&mut iter)),
+                        AddressMode::IndirectX => cpu.adc_indexed_x(parse_immediate(&mut iter)),
+                        AddressMode::IndirectY => cpu.adc_indexed_y(parse_immediate(&mut iter)),
+                        AddressMode::Invalid => println!("Invalid ADC request syntax"),
+                    },
+                    "sta" => match mode {
+                        AddressMode::ZeroPage => cpu.sta_zero_page(parse_zero_page(&mut iter)),
+                        AddressMode::ZeroPageX => cpu.sta_zero_page_x(parse_zero_page_x(&mut iter)),
+                        AddressMode::Absolute => cpu.sta_absolute(parse_absolute(&mut iter)),
+                        AddressMode::AbsoluteX => cpu.sta_absolute_x(parse_absolute(&mut iter)),
+                        AddressMode::AbsoluteY => cpu.sta_absolute_y(parse_absolute(&mut iter)),
+                        AddressMode::IndirectX => cpu.sta_indexed_x(parse_immediate(&mut iter)),
+                        AddressMode::IndirectY => cpu.sta_indexed_y(parse_immediate(&mut iter)),
+                        AddressMode::Invalid => println!("Invalid STA request syntax"),
                         _ => (),
                     },
                     _ => println!("{}", error_message),
@@ -114,25 +127,36 @@ where
     u16::from_str_radix(&last_two, BASE_RADIX).unwrap()
 }
 
-fn determine_mode(string: &str) -> String {
-    let result = match string.len() {
-        3 => "zero page",
-        4 => "immediate",
+fn determine_mode(string: &str) -> AddressMode {
+    match string.len() {
+        3 => AddressMode::ZeroPage,
+        4 => AddressMode::Immediate,
         5 => match string.find('X') {
-            Some(_) => "zero page x",
-            None => "absolute",
+            Some(_) => AddressMode::ZeroPageX,
+            None => AddressMode::Absolute,
         },
         7 => match string.find('(') {
             Some(_) => match string.find('X') {
-                Some(_) => "indirect X",
-                None => "indirect Y",
+                Some(_) => AddressMode::IndirectX,
+                None => AddressMode::IndirectY,
             },
             None => match string.find('X') {
-                Some(_) => "absolute X",
-                None => "absolute Y",
+                Some(_) => AddressMode::AbsoluteX,
+                None => AddressMode::AbsoluteY,
             },
         },
-        _ => "Invalid value",
-    };
-    String::from(result)
+        _ => AddressMode::Invalid,
+    }
+}
+
+enum AddressMode {
+    Immediate,
+    ZeroPage,
+    ZeroPageX,
+    Absolute,
+    AbsoluteX,
+    AbsoluteY,
+    IndirectX,
+    IndirectY,
+    Invalid,
 }
