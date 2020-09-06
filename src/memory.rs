@@ -1,4 +1,4 @@
-use hex::{decode, encode};
+use hex::encode;
 
 pub struct Memory {
   mem: [u8; 0xFFFF],

@@ -167,6 +167,7 @@ impl Display for StatusRegister {
   }
 }
 
+#[allow(dead_code)]
 enum StatusBit {
   Carry,
   Zero,

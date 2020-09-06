@@ -19,3 +19,36 @@ impl GeneralRegister {
     self.value = v;
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn new() {
+    let gr = GeneralRegister::new();
+    assert_eq!(gr.value, 0);
+  }
+
+  #[test]
+  fn reset() {
+    let mut gr = GeneralRegister::new();
+    gr.value = 25;
+    gr.reset();
+    assert_eq!(gr.value, 0);
+  }
+
+  #[test]
+  fn get() {
+    let mut gr = GeneralRegister::new();
+    gr.value = 39;
+    assert_eq!(gr.get(), 39);
+  }
+
+  #[test]
+  fn set() {
+    let mut gr = GeneralRegister::new();
+    gr.set(2);
+    assert_eq!(gr.value, 2);
+  }
+}
