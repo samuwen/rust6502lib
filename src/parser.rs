@@ -51,9 +51,7 @@ impl Parser {
             "adc" => match mode {
               AddressMode::Immediate => cpu.adc(Parser::parse_immediate(&mut iter)),
               AddressMode::ZeroPage => cpu.adc_zero_page(Parser::parse_zero_page(&mut iter)),
-              AddressMode::ZeroPageX => {
-                cpu.adc_zero_page_indexed(Parser::parse_zero_page_x(&mut iter))
-              }
+              AddressMode::ZeroPageX => cpu.adc_zero_page_x(Parser::parse_zero_page_x(&mut iter)),
               AddressMode::Absolute => cpu.adc_absolute(Parser::parse_absolute(&mut iter)),
               AddressMode::AbsoluteX => cpu.adc_absolute_x(Parser::parse_absolute(&mut iter)),
               AddressMode::AbsoluteY => cpu.adc_absolute_y(Parser::parse_absolute(&mut iter)),
