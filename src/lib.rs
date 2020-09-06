@@ -103,6 +103,46 @@ impl CPU {
     self.adc(value);
   }
 
+  pub fn sta_zero_page(&mut self, index: u8) {
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set_zero_page(index, self.accumulator);
+  }
+
+  pub fn sta_zero_page_x(&mut self, operand: u8) {
+    let index = operand.wrapping_add(self.x_register);
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set_zero_page(index, self.accumulator);
+  }
+
+  pub fn sta_absolute(&mut self, index: u16) {
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set(index, self.accumulator);
+  }
+
+  pub fn sta_absolute_x(&mut self, index: u16) {
+    let index = index + self.x_register as u16;
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set(index, self.accumulator);
+  }
+
+  pub fn sta_absolute_y(&mut self, index: u16) {
+    let index = index + self.y_register as u16;
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set(index, self.accumulator);
+  }
+
+  pub fn sta_indexed_x(&mut self, operand: u8) {
+    let index = self.memory.get_pre_adjusted_index(operand, self.x_register);
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set(index, self.accumulator);
+  }
+
+  pub fn sta_indexed_y(&mut self, operand: u8) {
+    let index = self.memory.get_pre_adjusted_index(operand, self.y_register);
+    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator, index);
+    self.memory.set(index, self.accumulator);
+  }
+
   pub fn clc(&mut self) {
     trace!("CLC called");
     self.status_register.clear_carry_bit();
@@ -264,6 +304,71 @@ mod tests {
     cpu.accumulator = 0xA0;
     cpu.adc_absolute_y(0x5678);
     assert_eq!(cpu.accumulator, 0x30);
+  }
+
+  #[test]
+  fn sta_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x34;
+    cpu.sta_zero_page(0x55);
+    assert_eq!(cpu.memory.get_zero_page(0x55), 0x34);
+  }
+
+  #[test]
+  fn sta_zero_page_x() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x99;
+    cpu.x_register = 0x34;
+    cpu.sta_zero_page_x(0x55);
+    assert_eq!(cpu.memory.get_zero_page(0x55 + 0x34), 0x99);
+  }
+
+  #[test]
+  fn sta_absolute() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x99;
+    cpu.sta_absolute(0x1255);
+    assert_eq!(cpu.memory.get_u16(0x1255), 0x99);
+  }
+
+  #[test]
+  fn sta_absolute_x() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x99;
+    cpu.x_register = 0x10;
+    cpu.sta_absolute_x(0x1255);
+    assert_eq!(cpu.memory.get_u16(0x1265), 0x99);
+  }
+
+  #[test]
+  fn sta_absolute_y() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x99;
+    cpu.y_register = 0x20;
+    cpu.sta_absolute_y(0x1275);
+    assert_eq!(cpu.memory.get_u16(0x1295), 0x99);
+  }
+
+  #[test]
+  fn sta_indexed_x() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x99;
+    cpu.x_register = 0x20;
+    cpu.memory.set(0x32, 0x20);
+    cpu.memory.set(0x33, 0x25);
+    cpu.sta_indexed_x(0x12);
+    assert_eq!(cpu.memory.get_u16(0x2520), 0x99);
+  }
+
+  #[test]
+  fn sta_indexed_y() {
+    let mut cpu = CPU::new();
+    cpu.accumulator = 0x45;
+    cpu.y_register = 0x20;
+    cpu.memory.set(0x76, 0x57);
+    cpu.memory.set(0x77, 0xCB);
+    cpu.sta_indexed_y(0x12);
+    assert_eq!(cpu.memory.get_u16(0xCB69), 0x45);
   }
 
   #[test]
