@@ -69,10 +69,20 @@ impl CPU {
   ============================================================================================
   */
 
+  /// Generically handles zero page retrieval operations and calls a callback when complete
   fn generic_zero_page<F: FnMut(&mut Self, u8)>(&mut self, index: u8, name: &str, cb: &mut F) {
     trace!("{} zero page called with index: 0x{:X}", name, index);
     let value = self.memory.get_zero_page(index);
     cb(self, value);
+  }
+
+  /// Same as above but returns a u8
+  ///
+  /// Name is shorter because I hate rust's multi-line formatting :)
+  fn zp_return<F: FnMut(&mut Self, u8) -> u8>(&mut self, idx: u8, name: &str, cb: &mut F) -> u8 {
+    trace!("{} zero page called with index: 0x{:X}", name, idx);
+    let value = self.memory.get_zero_page(idx);
+    cb(self, value)
   }
 
   fn generic_zero_page_x<F: FnMut(&mut Self, u8)>(&mut self, op: u8, name: &str, cb: &mut F) {
@@ -94,13 +104,29 @@ impl CPU {
     self.program_counter.advance(1);
   }
 
-  pub fn generic_abs_x<F: FnMut(&mut Self, u8)>(&mut self, index: u16, name: &str, cb: &mut F) {
+  fn abs_return<F: FnMut(&mut Self, u8) -> u8>(&mut self, idx: u16, name: &str, cb: &mut F) -> u8 {
+    trace!("{} absolute called with index: 0x{:X}", name, idx);
+    let value = self.memory.get_u16(idx);
+    self.program_counter.advance(1);
+    cb(self, value)
+  }
+
+  fn generic_abs_x<F: FnMut(&mut Self, u8)>(&mut self, index: u16, name: &str, cb: &mut F) {
     trace!("{} absolute x called with index: 0x{:X}", name, index);
     let value = self
       .memory
       .get_u16_and_register(index, self.x_register.get());
     cb(self, value);
     self.program_counter.advance(1);
+  }
+
+  fn abs_x_ret<F: FnMut(&mut Self, u8) -> u8>(&mut self, index: u16, name: &str, cb: &mut F) -> u8 {
+    trace!("{} absolute x called with index: 0x{:X}", name, index);
+    let value = self
+      .memory
+      .get_u16_and_register(index, self.x_register.get());
+    self.program_counter.advance(1);
+    cb(self, value)
   }
 
   fn generic_abs_y<F: FnMut(&mut Self, u8)>(&mut self, index: u16, name: &str, cb: &mut F) {
@@ -113,14 +139,14 @@ impl CPU {
   }
 
   /// AKA Indexed indirect AKA pre-indexed
-  pub fn generic_indexed_x<F: FnMut(&mut Self, u8)>(&mut self, op: u8, name: &str, cb: &mut F) {
+  fn generic_indexed_x<F: FnMut(&mut Self, u8)>(&mut self, op: u8, name: &str, cb: &mut F) {
     trace!("{} indexed x called with operand: 0x{:X}", name, op);
     let value = self.memory.get_pre_indexed_data(op, self.x_register.get());
     cb(self, value);
   }
 
   /// AKA Indirect indexed AKA post-indexed
-  pub fn generic_indexed_y<F: FnMut(&mut Self, u8)>(&mut self, op: u8, name: &str, cb: &mut F) {
+  fn generic_indexed_y<F: FnMut(&mut Self, u8)>(&mut self, op: u8, name: &str, cb: &mut F) {
     trace!("{} indexed y called with operand: 0x{:X}", name, op);
     let value = self.memory.get_post_indexed_data(op, self.y_register.get());
     cb(self, value);
@@ -195,7 +221,6 @@ impl CPU {
   pub fn and(&mut self, value: u8) {
     let message = "AND";
     trace!("{} called with value: 0x{:X}", message, value);
-    let ac = self.accumulator.get();
     let result = self.accumulator.get() & value;
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
@@ -229,6 +254,42 @@ impl CPU {
 
   pub fn and_indexed_y(&mut self, operand: u8) {
     self.generic_indexed_y(operand, "AND", &mut CPU::and);
+  }
+
+  /// Shifts all bits left one position
+  ///
+  /// Affects flags N Z C
+  fn asl(&mut self, value: u8) -> u8 {
+    let (result, carry) = value.overflowing_shl(1);
+    self.status_register.handle_n_flag(result, "ASL");
+    self.status_register.handle_z_flag(result, "ASL");
+    self.status_register.handle_c_flag("ASL", carry);
+    result
+  }
+
+  pub fn asl_accumulator(&mut self) {
+    let result = self.asl(self.accumulator.get());
+    self.accumulator.set(result);
+  }
+
+  pub fn asl_zero_page(&mut self, index: u8) {
+    let result = self.zp_return(index, "ASL", &mut CPU::asl);
+    self.memory.set_zero_page(index, result);
+  }
+
+  pub fn asl_zero_page_x(&mut self, operand: u8) {
+    self.generic_zero_page_x(operand, "ASL", &mut CPU::asl_zero_page);
+  }
+
+  pub fn asl_absolute(&mut self, index: u16) {
+    let result = self.abs_return(index, "ASL", &mut CPU::asl);
+    self.memory.set(index, result);
+  }
+
+  pub fn asl_absolute_x(&mut self, index: u16) {
+    let result = self.abs_x_ret(index, "ASL", &mut CPU::asl);
+    let index = index + self.x_register.get() as u16;
+    self.memory.set(index, result);
   }
 
   pub fn clc(&mut self) {
@@ -855,5 +916,54 @@ mod tests {
     cpu.y_register.set(0x20);
     cpu.and_absolute_y(0x1234);
     assert_eq!(cpu.accumulator.get(), 0x14);
+  }
+
+  #[test]
+  fn asl() {
+    let mut cpu = CPU::new();
+    let result = cpu.asl(0xFF);
+    assert_eq!(result, 0xFE);
+  }
+
+  #[test]
+  fn asl_accumulator() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x65);
+    cpu.asl_accumulator();
+    assert_eq!(cpu.accumulator.get(), 0xCA);
+  }
+
+  #[test]
+  fn asl_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.memory.set_zero_page(0xBA, 0xCC);
+    cpu.asl_zero_page(0xBA);
+    assert_eq!(cpu.memory.get_zero_page(0xBA), 0x98);
+  }
+
+  #[test]
+  fn asl_zero_page_x() {
+    let mut cpu = CPU::new();
+    cpu.memory.set_zero_page(0x9B, 0xCC);
+    cpu.x_register.set(0xE1);
+    cpu.asl_zero_page_x(0xBA);
+    assert_eq!(cpu.memory.get_zero_page(0x9B), 0x98);
+  }
+
+  #[test]
+  fn asl_absolute() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x9BB9, 0xDD);
+    cpu.asl_absolute(0x9BB9);
+    assert_eq!(cpu.memory.get_u16(0x9BB9), 0xBA);
+  }
+
+  #[test]
+  fn asl_absolute_x() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x9BF1, 0xDD);
+    cpu.x_register.set(0x38);
+    cpu.asl_absolute_x(0x9BB9);
+    assert_eq!(cpu.memory.get_u16(0x9BF1), 0xBA);
   }
 }
