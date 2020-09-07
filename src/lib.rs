@@ -284,7 +284,6 @@ impl CPU {
 
   pub fn asl_zero_page_x(&mut self, operand: u8) {
     self.generic_zero_page_x(operand, "ASL", &mut CPU::asl_zero_page);
-    self.program_counter.advance(2);
   }
 
   pub fn asl_absolute(&mut self, index: u16) {
@@ -562,6 +561,10 @@ mod tests {
     rand_range(0x7F, 0xFF)
   }
 
+  fn r_lsb() -> u8 {
+    rand_range(0, 0xFE)
+  }
+
   #[test]
   fn create_new_cpu() {
     let cpu = CPU::new();
@@ -607,13 +610,21 @@ mod tests {
     cpu
   }
 
-  fn setup_indexed(acc: u8, index: u16, value: u8, v1: u8, v2: u8, op: u8, reg_v: u8) -> CPU {
+  fn setup_indexed_x(acc: u8, index: u16, value: u8, v1: u8, v2: u8, op: u8, reg_v: u8) -> CPU {
     let mut cpu = setup(acc);
     cpu.memory.set(index, value);
     cpu.memory.set(op.wrapping_add(reg_v) as u16, v1);
     cpu
       .memory
       .set(op.wrapping_add(reg_v).wrapping_add(1) as u16, v2);
+    cpu
+  }
+
+  fn setup_indexed_y(acc: u8, index: u16, value: u8, v1: u8, v2: u8, op: u8, reg_v: u8) -> CPU {
+    let mut cpu = setup(acc);
+    cpu.memory.set(index + reg_v as u16, value);
+    cpu.memory.set(op as u16, v1);
+    cpu.memory.set(op.wrapping_add(1) as u16, v2);
     cpu
   }
 
@@ -710,15 +721,31 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(no_wrap(), random(), random(), 0x30, 0x40, 0x4030, no_wrap(), 0; "indexed x without wrap without carry")]
-  #[test_case(wrap(), random(), random(), 0x30, 0x40, 0x4030, wrap(), 0; "indexed x with wrap without carry")]
-  #[test_case(no_wrap(), random(), random(), 0x30, 0x40, 0x4030, no_wrap(), 1; "indexed x without wrap with carry")]
-  #[test_case(wrap(), random(), random(), 0x30, 0x40, 0x4030, wrap(), 1; "indexed x with wrap with carry")]
+  #[test_case(no_wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, no_wrap(), 0; "indexed x without wrap without carry")]
+  #[test_case(wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, wrap(), 0; "indexed x with wrap without carry")]
+  #[test_case(no_wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, no_wrap(), 1; "indexed x without wrap with carry")]
+  #[test_case(wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, wrap(), 1; "indexed x with wrap with carry")]
   fn adc_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, index: u16, value: u8, carry: u8) {
-    let mut cpu = setup_indexed(acc, index, value, v1, v2, operand, x);
+    let mut cpu = setup_indexed_x(acc, index, value, v1, v2, operand, x);
     setup_carry(&mut cpu, carry);
     cpu.x_register.set(x);
     cpu.adc_indexed_x(operand);
+    assert_eq!(
+      cpu.accumulator.get(),
+      value.wrapping_add(acc).wrapping_add(carry)
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(no_wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, no_wrap(), 0; "indexed y without wrap without carry")]
+  #[test_case(wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, wrap(), 0; "indexed y with wrap without carry")]
+  #[test_case(no_wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, no_wrap(), 1; "indexed y without wrap with carry")]
+  #[test_case(wrap(), r_lsb(), random(), 0x30, 0x40, 0x4030, wrap(), 1; "indexed y with wrap with carry")]
+  fn adc_indexed_y(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, index: u16, value: u8, carry: u8) {
+    let mut cpu = setup_indexed_y(acc, index, value, v1, v2, operand, x);
+    setup_carry(&mut cpu, carry);
+    cpu.y_register.set(x);
+    cpu.adc_indexed_y(operand);
     assert_eq!(
       cpu.accumulator.get(),
       value.wrapping_add(acc).wrapping_add(carry)
@@ -775,6 +802,337 @@ mod tests {
     cpu.and_absolute_y(index);
     assert_eq!(cpu.accumulator.get(), acc & value);
     assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), random(), random(), 0xCA, 0x4F, 0x4FCA, random())]
+  fn and_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, index: u16, value: u8) {
+    let mut cpu = setup_indexed_x(acc, index, value, v1, v2, operand, x);
+    cpu.x_register.set(x);
+    cpu.and_indexed_x(operand);
+    assert_eq!(cpu.accumulator.get(), value & acc);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random(), 0xCA, 0x4F, 0x4FCA, random())]
+  fn and_indexed_y(acc: u8, operand: u8, y: u8, v1: u8, v2: u8, index: u16, value: u8) {
+    let mut cpu = setup_indexed_y(acc, index, value, v1, v2, operand, y);
+    cpu.y_register.set(y);
+    cpu.and_indexed_y(operand);
+    assert_eq!(cpu.accumulator.get(), value & acc);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(no_wrap(); "without wrap")]
+  #[test_case(wrap(); "with wrap")]
+  fn asl(val: u8) {
+    let mut cpu = CPU::new();
+    let result = cpu.asl(val);
+    assert_eq!(result, val.wrapping_shl(1));
+  }
+
+  #[test_case(no_wrap(); "without wrap")]
+  #[test_case(wrap(); "with wrap")]
+  fn asl_accumulator(acc: u8) {
+    let mut cpu = setup(acc);
+    cpu.asl_accumulator();
+    assert_eq!(cpu.accumulator.get(), acc.wrapping_shl(1));
+    assert_eq!(cpu.program_counter.get(), 1);
+  }
+
+  #[test_case(random(), no_wrap(); "without wrap")]
+  #[test_case(random(), wrap(); "with wrap")]
+  fn asl_zero_page(index: u8, value: u8) {
+    let mut cpu = setup_zp(0, index, value);
+    cpu.asl_zero_page(index);
+    assert_eq!(cpu.memory.get_zero_page(index), value.wrapping_shl(1));
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(no_wrap(), no_wrap(), no_wrap(); "without shift wrap without index wrap")]
+  #[test_case(no_wrap(), wrap(), no_wrap(); "with shift wrap without index wrap")]
+  #[test_case(wrap(), no_wrap(), wrap(); "without shift wrap with index wrap")]
+  #[test_case(wrap(), wrap(), wrap(); "with shift wrap with index wrap")]
+  fn asl_zero_page_x(index: u8, value: u8, x: u8) {
+    let mod_index = index.wrapping_add(x);
+    let mut cpu = setup_zp(0, mod_index, value);
+    cpu.x_register.set(x);
+    cpu.asl_zero_page_x(index);
+    assert_eq!(cpu.memory.get_zero_page(mod_index), value.wrapping_shl(1));
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), no_wrap(); "without wrap")]
+  #[test_case(random(), wrap(); "with wrap")]
+  fn asl_absolute(index: u16, value: u8) {
+    let mut cpu = setup_abs(0, index, value);
+    cpu.asl_absolute(index);
+    assert_eq!(cpu.memory.get_u16(index), value.wrapping_shl(1));
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), no_wrap(), no_wrap(); "without wrap")]
+  #[test_case(random(), no_wrap(), wrap(); "with wrap")]
+  fn asl_absolute_x(index: u16, value: u8, x: u8) {
+    let mod_index = index.wrapping_add(x as u16);
+    let mut cpu = setup_abs(0, mod_index, value);
+    cpu.x_register.set(x);
+    cpu.asl_absolute_x(index);
+    assert_eq!(cpu.memory.get_u16(mod_index), value.wrapping_shl(1));
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test]
+  fn bit_zero_bit() {
+    let mut cpu = CPU::new();
+    cpu.bit(0);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
+    cpu.accumulator.set(0xFF);
+    cpu.bit(0xFF);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+  }
+
+  fn is_zero_bit_set(val: u8) -> bool {
+    val == 0
+  }
+
+  fn is_overflow_bit_set(val: u8) -> bool {
+    val & 0x40 > 0
+  }
+
+  fn is_negative_bit_set(val: u8) -> bool {
+    val & 0x80 > 0
+  }
+
+  #[test_case(random())]
+  fn bit_overflow_bit(val: u8) {
+    let mut cpu = CPU::new();
+    cpu.bit(val);
+    assert_eq!(
+      cpu.status_register.is_overflow_bit_set(),
+      is_overflow_bit_set(val)
+    );
+  }
+
+  #[test_case(random())]
+  fn bit_negative_bit(val: u8) {
+    let mut cpu = CPU::new();
+    cpu.bit(val);
+    assert_eq!(
+      cpu.status_register.is_negative_bit_set(),
+      is_negative_bit_set(val)
+    );
+  }
+
+  #[test_case(random(), random(), random())]
+  fn bit_zero_page(val: u8, index: u8, acc: u8) {
+    let mut cpu = CPU::new();
+    cpu.memory.set_zero_page(index, val);
+    cpu.accumulator.set(acc);
+    cpu.bit_zero_page(index);
+    assert_eq!(
+      cpu.status_register.is_zero_bit_set(),
+      is_zero_bit_set(val & acc)
+    );
+    assert_eq!(
+      cpu.status_register.is_negative_bit_set(),
+      is_negative_bit_set(val)
+    );
+    assert_eq!(
+      cpu.status_register.is_overflow_bit_set(),
+      is_overflow_bit_set(val)
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn bit_absolute(index: u16, val: u8, acc: u8) {
+    let mut cpu = CPU::new();
+    cpu.memory.set(index, val);
+    cpu.accumulator.set(acc);
+    cpu.bit_absolute(index);
+    assert_eq!(
+      cpu.status_register.is_zero_bit_set(),
+      is_zero_bit_set(val & acc)
+    );
+    assert_eq!(
+      cpu.status_register.is_negative_bit_set(),
+      is_negative_bit_set(val)
+    );
+    assert_eq!(
+      cpu.status_register.is_overflow_bit_set(),
+      is_overflow_bit_set(val)
+    );
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test]
+  fn clc() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_carry_bit();
+    cpu.clc();
+    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
+    assert_eq!(cpu.program_counter.get(), 1);
+  }
+
+  #[test]
+  fn cld() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_decimal_bit();
+    cpu.cld();
+    assert_eq!(cpu.status_register.is_decimal_bit_set(), false);
+    assert_eq!(cpu.program_counter.get(), 1);
+  }
+
+  #[test]
+  fn cli() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_interrupt_bit();
+    cpu.cli();
+    assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
+    assert_eq!(cpu.program_counter.get(), 1);
+  }
+
+  #[test]
+  fn clv() {
+    let mut cpu = CPU::new();
+    cpu.status_register.set_overflow_bit();
+    cpu.clv();
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
+    assert_eq!(cpu.program_counter.get(), 1);
+  }
+
+  #[test_case(random())]
+  fn lda(val: u8) {
+    let mut cpu = CPU::new();
+    cpu.lda(val);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random())]
+  fn lda_zero_page(val: u8, index: u8) {
+    let mut cpu = setup_zp(0, index, val);
+    cpu.lda_zero_page(index);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn lda_zero_page_x(val: u8, x: u8, index: u8) {
+    let mut cpu = setup_zp(0, index.wrapping_add(x), val);
+    cpu.x_register.set(x);
+    cpu.lda_zero_page_x(index);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random())]
+  fn lda_absolute(index: u16, val: u8) {
+    let mut cpu = setup_abs(0, index, val);
+    cpu.lda_absolute(index);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn lda_absolute_x(index: u16, val: u8, x: u8) {
+    let mut cpu = setup_abs(0, index + x as u16, val);
+    cpu.x_register.set(x);
+    cpu.lda_absolute_x(index);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn lda_absolute_y(index: u16, y: u8, val: u8) {
+    let mut cpu = setup_abs(0, index + y as u16, val);
+    cpu.y_register.set(y);
+    cpu.lda_absolute_y(index);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random())]
+  fn ldx(val: u8) {
+    let mut cpu = CPU::new();
+    cpu.ldx(val);
+    assert_eq!(cpu.x_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random())]
+  fn ldx_zero_page(index: u8, val: u8) {
+    let mut cpu = setup_zp(0, index, val);
+    cpu.ldx_zero_page(index);
+    assert_eq!(cpu.x_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn ldx_zero_page_y(index: u8, val: u8, y: u8) {
+    let mut cpu = setup_zp(0, index.wrapping_add(y), val);
+    cpu.y_register.set(y);
+    cpu.ldx_zero_page_y(index);
+    assert_eq!(cpu.x_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random())]
+  fn ldx_absolute(index: u16, val: u8) {
+    let mut cpu = setup_abs(0, index, val);
+    cpu.ldx_absolute(index);
+    assert_eq!(cpu.x_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn ldx_absolute_y(index: u16, val: u8, y: u8) {
+    let mut cpu = setup_abs(0, index.wrapping_add(y as u16), val);
+    cpu.y_register.set(y);
+    cpu.ldx_absolute_y(index);
+    assert_eq!(cpu.x_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test]
+  fn ldy() {
+    let mut cpu = CPU::new();
+    cpu.ldy(0x11);
+    assert_eq!(cpu.y_register.get(), 0x11);
+  }
+
+  #[test]
+  fn ldy_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x39, 0x11);
+    cpu.ldy_zero_page(0x39);
+    assert_eq!(cpu.y_register.get(), 0x11);
+  }
+
+  #[test]
+  fn ldy_zero_page_x() {
+    let mut cpu = CPU::new();
+    cpu.x_register.set(0x75);
+    cpu.memory.set_zero_page(0x32 + 0x75, 0x12);
+    cpu.ldy_zero_page_x(0x32);
+    assert_eq!(cpu.y_register.get(), 0x12);
+  }
+
+  #[test]
+  fn ldy_absolute() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x1234, 0x56);
+    cpu.ldy_absolute(0x1234);
+    assert_eq!(cpu.y_register.get(), 0x56);
+  }
+
+  #[test]
+  fn ldy_absolute_x() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x1254, 0x56);
+    cpu.x_register.set(0x20);
+    cpu.ldy_absolute_x(0x1234);
+    assert_eq!(cpu.y_register.get(), 0x56);
   }
 
   #[test]
@@ -843,166 +1201,10 @@ mod tests {
   }
 
   #[test]
-  fn lda() {
-    let mut cpu = CPU::new();
-    cpu.lda(0x11);
-    assert_eq!(cpu.accumulator.get(), 0x11);
-  }
-
-  #[test]
-  fn lda_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set_zero_page(0x32, 0x12);
-    cpu.lda_zero_page(0x32);
-    assert_eq!(cpu.accumulator.get(), 0x12);
-  }
-
-  #[test]
-  fn lda_zero_page_x() {
-    let mut cpu = CPU::new();
-    cpu.x_register.set(0x75);
-    cpu.memory.set_zero_page(0x32 + 0x75, 0x12);
-    cpu.lda_zero_page_x(0x32);
-    assert_eq!(cpu.accumulator.get(), 0x12);
-  }
-
-  #[test]
-  fn lda_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1234, 0x56);
-    cpu.lda_absolute(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x56);
-  }
-
-  #[test]
-  fn lda_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1254, 0x56);
-    cpu.x_register.set(0x20);
-    cpu.lda_absolute_x(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x56);
-  }
-
-  #[test]
-  fn lda_absolute_y() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1254, 0x56);
-    cpu.y_register.set(0x20);
-    cpu.lda_absolute_y(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x56);
-  }
-
-  #[test]
-  fn ldx() {
-    let mut cpu = CPU::new();
-    cpu.ldx(0x11);
-    assert_eq!(cpu.x_register.get(), 0x11);
-  }
-
-  #[test]
-  fn ldx_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x39, 0x11);
-    cpu.ldx_zero_page(0x39);
-    assert_eq!(cpu.x_register.get(), 0x11);
-  }
-
-  #[test]
-  fn ldx_zero_page_y() {
-    let mut cpu = CPU::new();
-    cpu.y_register.set(0x75);
-    cpu.memory.set_zero_page(0x32 + 0x75, 0x12);
-    cpu.ldx_zero_page_y(0x32);
-    assert_eq!(cpu.x_register.get(), 0x12);
-  }
-
-  #[test]
-  fn ldx_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1234, 0x56);
-    cpu.ldx_absolute(0x1234);
-    assert_eq!(cpu.x_register.get(), 0x56);
-  }
-
-  #[test]
-  fn ldx_absolute_y() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1254, 0x56);
-    cpu.y_register.set(0x20);
-    cpu.ldx_absolute_y(0x1234);
-    assert_eq!(cpu.x_register.get(), 0x56);
-  }
-
-  #[test]
-  fn ldy() {
-    let mut cpu = CPU::new();
-    cpu.ldy(0x11);
-    assert_eq!(cpu.y_register.get(), 0x11);
-  }
-
-  #[test]
-  fn ldy_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x39, 0x11);
-    cpu.ldy_zero_page(0x39);
-    assert_eq!(cpu.y_register.get(), 0x11);
-  }
-
-  #[test]
-  fn ldy_zero_page_x() {
-    let mut cpu = CPU::new();
-    cpu.x_register.set(0x75);
-    cpu.memory.set_zero_page(0x32 + 0x75, 0x12);
-    cpu.ldy_zero_page_x(0x32);
-    assert_eq!(cpu.y_register.get(), 0x12);
-  }
-
-  #[test]
-  fn ldy_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1234, 0x56);
-    cpu.ldy_absolute(0x1234);
-    assert_eq!(cpu.y_register.get(), 0x56);
-  }
-
-  #[test]
-  fn ldy_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1254, 0x56);
-    cpu.x_register.set(0x20);
-    cpu.ldy_absolute_x(0x1234);
-    assert_eq!(cpu.y_register.get(), 0x56);
-  }
-
-  #[test]
-  fn clc() {
-    let mut cpu = CPU::new();
-    cpu.status_register.set_carry_bit();
-    cpu.clc();
-    assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-  }
-
-  #[test]
   fn sec() {
     let mut cpu = CPU::new();
     cpu.sec();
     assert_eq!(cpu.status_register.is_carry_bit_set(), true);
-  }
-
-  #[test]
-  fn clv() {
-    let mut cpu = CPU::new();
-    cpu.status_register.set_overflow_bit();
-    cpu.clv();
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
-  }
-
-  #[test]
-  fn cld() {
-    let mut cpu = CPU::new();
-    cpu.status_register.set_decimal_bit();
-    cpu.cld();
-    assert_eq!(cpu.status_register.is_decimal_bit_set(), false);
   }
 
   #[test]
@@ -1013,116 +1215,9 @@ mod tests {
   }
 
   #[test]
-  fn cli() {
-    let mut cpu = CPU::new();
-    cpu.status_register.set_interrupt_bit();
-    cpu.cli();
-    assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
-  }
-
-  #[test]
   fn sei() {
     let mut cpu = CPU::new();
     cpu.sei();
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
-  }
-
-  #[test]
-  fn asl() {
-    let mut cpu = CPU::new();
-    let result = cpu.asl(0xFF);
-    assert_eq!(result, 0xFE);
-  }
-
-  #[test]
-  fn asl_accumulator() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x65);
-    cpu.asl_accumulator();
-    assert_eq!(cpu.accumulator.get(), 0xCA);
-  }
-
-  #[test]
-  fn asl_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set_zero_page(0xBA, 0xCC);
-    cpu.asl_zero_page(0xBA);
-    assert_eq!(cpu.memory.get_zero_page(0xBA), 0x98);
-  }
-
-  #[test]
-  fn asl_zero_page_x() {
-    let mut cpu = CPU::new();
-    cpu.memory.set_zero_page(0x9B, 0xCC);
-    cpu.x_register.set(0xE1);
-    cpu.asl_zero_page_x(0xBA);
-    assert_eq!(cpu.memory.get_zero_page(0x9B), 0x98);
-  }
-
-  #[test]
-  fn asl_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x9BB9, 0xDD);
-    cpu.asl_absolute(0x9BB9);
-    assert_eq!(cpu.memory.get_u16(0x9BB9), 0xBA);
-  }
-
-  #[test]
-  fn asl_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x9BF1, 0xDD);
-    cpu.x_register.set(0x38);
-    cpu.asl_absolute_x(0x9BB9);
-    assert_eq!(cpu.memory.get_u16(0x9BF1), 0xBA);
-  }
-
-  #[test]
-  fn bit_zero_bit() {
-    let mut cpu = CPU::new();
-    cpu.bit(0);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
-    cpu.accumulator.set(0xFF);
-    cpu.bit(0xFF);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
-  }
-
-  #[test]
-  fn bit_overflow_bit() {
-    let mut cpu = CPU::new();
-    cpu.bit(0);
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
-    cpu.bit(0xFF);
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
-  }
-
-  #[test]
-  fn bit_negative_bit() {
-    let mut cpu = CPU::new();
-    cpu.bit(0);
-    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
-    cpu.bit(0xFF);
-    assert_eq!(cpu.status_register.is_negative_bit_set(), true);
-  }
-
-  #[test]
-  fn bit_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set_zero_page(0x65, 0x55);
-    cpu.accumulator.set(0xAA);
-    cpu.bit_zero_page(0x65);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
-    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
-  }
-
-  #[test]
-  fn bit_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x6556, 0x55);
-    cpu.accumulator.set(0xAA);
-    cpu.bit_absolute(0x6556);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
-    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
-    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
   }
 }
