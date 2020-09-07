@@ -45,8 +45,31 @@ impl Parser {
           match string[0] {
             "lda" => match mode {
               AddressMode::Immediate => cpu.lda(Parser::parse_immediate(&mut iter)),
+              AddressMode::ZeroPage => cpu.lda_zero_page(Parser::parse_zero_page(&mut iter)),
+              AddressMode::ZeroPageX => cpu.lda_zero_page_x(Parser::parse_zero_page_x(&mut iter)),
+              AddressMode::Absolute => cpu.lda_absolute(Parser::parse_absolute(&mut iter)),
+              AddressMode::AbsoluteX => cpu.lda_absolute_x(Parser::parse_absolute(&mut iter)),
+              AddressMode::AbsoluteY => cpu.lda_absolute_y(Parser::parse_absolute(&mut iter)),
+              AddressMode::IndirectX => cpu.lda_indexed_x(Parser::parse_immediate(&mut iter)),
+              AddressMode::IndirectY => cpu.lda_indexed_y(Parser::parse_immediate(&mut iter)),
               AddressMode::Invalid => println!("Invalid LDA request syntax"),
               _ => (),
+            },
+            "ldx" => match mode {
+              AddressMode::Immediate => cpu.ldx(Parser::parse_immediate(&mut iter)),
+              AddressMode::ZeroPage => cpu.ldx_zero_page(Parser::parse_zero_page(&mut iter)),
+              AddressMode::ZeroPageY => cpu.ldx_zero_page_y(Parser::parse_zero_page_x(&mut iter)),
+              AddressMode::Absolute => cpu.ldx_absolute(Parser::parse_absolute(&mut iter)),
+              AddressMode::AbsoluteY => cpu.ldx_absolute_y(Parser::parse_absolute(&mut iter)),
+              _ => println!("Invalid LDX request syntax"),
+            },
+            "ldy" => match mode {
+              AddressMode::Immediate => cpu.ldy(Parser::parse_immediate(&mut iter)),
+              AddressMode::ZeroPage => cpu.ldy_zero_page(Parser::parse_zero_page(&mut iter)),
+              AddressMode::ZeroPageX => cpu.ldy_zero_page_x(Parser::parse_zero_page_x(&mut iter)),
+              AddressMode::Absolute => cpu.ldy_absolute(Parser::parse_absolute(&mut iter)),
+              AddressMode::AbsoluteX => cpu.ldy_absolute_x(Parser::parse_absolute(&mut iter)),
+              _ => println!("Invalid LDY request syntax"),
             },
             "adc" => match mode {
               AddressMode::Immediate => cpu.adc(Parser::parse_immediate(&mut iter)),
@@ -57,7 +80,18 @@ impl Parser {
               AddressMode::AbsoluteY => cpu.adc_absolute_y(Parser::parse_absolute(&mut iter)),
               AddressMode::IndirectX => cpu.adc_indexed_x(Parser::parse_immediate(&mut iter)),
               AddressMode::IndirectY => cpu.adc_indexed_y(Parser::parse_immediate(&mut iter)),
-              AddressMode::Invalid => println!("Invalid ADC request syntax"),
+              _ => println!("Invalid ADC request syntax"),
+            },
+            "and" => match mode {
+              AddressMode::Immediate => cpu.and(Parser::parse_immediate(&mut iter)),
+              AddressMode::ZeroPage => cpu.and_zero_page(Parser::parse_zero_page(&mut iter)),
+              AddressMode::ZeroPageX => cpu.and_zero_page_x(Parser::parse_zero_page_x(&mut iter)),
+              AddressMode::Absolute => cpu.and_absolute(Parser::parse_absolute(&mut iter)),
+              AddressMode::AbsoluteX => cpu.and_absolute_x(Parser::parse_absolute(&mut iter)),
+              AddressMode::AbsoluteY => cpu.and_absolute_y(Parser::parse_absolute(&mut iter)),
+              AddressMode::IndirectX => cpu.and_indexed_x(Parser::parse_immediate(&mut iter)),
+              AddressMode::IndirectY => cpu.and_indexed_y(Parser::parse_immediate(&mut iter)),
+              _ => println!("Invalid AND request syntax"),
             },
             "sta" => match mode {
               AddressMode::ZeroPage => cpu.sta_zero_page(Parser::parse_zero_page(&mut iter)),
@@ -67,8 +101,7 @@ impl Parser {
               AddressMode::AbsoluteY => cpu.sta_absolute_y(Parser::parse_absolute(&mut iter)),
               AddressMode::IndirectX => cpu.sta_indexed_x(Parser::parse_immediate(&mut iter)),
               AddressMode::IndirectY => cpu.sta_indexed_y(Parser::parse_immediate(&mut iter)),
-              AddressMode::Invalid => println!("Invalid STA request syntax"),
-              _ => (),
+              _ => println!("Invalid STA request syntax"),
             },
             _ => println!("{}", error_message),
           }
@@ -133,7 +166,10 @@ impl Parser {
       4 => AddressMode::Immediate,
       5 => match string.find('X') {
         Some(_) => AddressMode::ZeroPageX,
-        None => AddressMode::Absolute,
+        None => match string.find('Y') {
+          Some(_) => AddressMode::ZeroPageY,
+          None => AddressMode::Absolute,
+        },
       },
       7 => match string.find('(') {
         Some(_) => match string.find('X') {
@@ -154,6 +190,7 @@ enum AddressMode {
   Immediate,
   ZeroPage,
   ZeroPageX,
+  ZeroPageY,
   Absolute,
   AbsoluteX,
   AbsoluteY,

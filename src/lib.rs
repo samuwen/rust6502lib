@@ -63,6 +63,12 @@ impl CPU {
     }
   }
 
+  /*
+  ============================================================================================
+                                  Generic operations
+  ============================================================================================
+  */
+
   fn generic_zero_page<F: FnMut(&mut Self, u8)>(&mut self, index: u8, name: &str, cb: &mut F) {
     trace!("{} zero page called with index: 0x{:X}", name, index);
     let value = self.memory.get_zero_page(index);
@@ -120,6 +126,18 @@ impl CPU {
     cb(self, value);
   }
 
+  fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
+    trace!("{} called", name);
+    cb(&mut self.status_register);
+    self.program_counter.advance(1);
+  }
+
+  /*
+  ============================================================================================
+                                  Opcodes
+  ============================================================================================
+  */
+
   /// Adds the value given to the accumulator
   ///
   /// Affects flags N V Z C
@@ -169,6 +187,172 @@ impl CPU {
 
   pub fn adc_indexed_y(&mut self, operand: u8) {
     self.generic_indexed_y(operand, "ADC", &mut CPU::adc);
+  }
+
+  /// Bitwise and operation performed against the accumulator
+  ///
+  /// Affects flags N Z
+  pub fn and(&mut self, value: u8) {
+    let message = "AND";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let ac = self.accumulator.get();
+    let result = self.accumulator.get() & value;
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+    self.program_counter.advance(2);
+  }
+
+  pub fn and_zero_page(&mut self, index: u8) {
+    self.generic_zero_page(index, "AND", &mut CPU::and);
+  }
+
+  pub fn and_zero_page_x(&mut self, index: u8) {
+    self.generic_zero_page_x(index, "AND", &mut CPU::and_zero_page);
+  }
+
+  pub fn and_absolute(&mut self, index: u16) {
+    self.generic_absolute(index, "AND", &mut CPU::and);
+  }
+
+  pub fn and_absolute_x(&mut self, index: u16) {
+    self.generic_abs_x(index, "AND", &mut CPU::and);
+  }
+
+  pub fn and_absolute_y(&mut self, index: u16) {
+    self.generic_abs_y(index, "AND", &mut CPU::and);
+  }
+
+  pub fn and_indexed_x(&mut self, operand: u8) {
+    self.generic_indexed_x(operand, "AND", &mut CPU::and);
+  }
+
+  pub fn and_indexed_y(&mut self, operand: u8) {
+    self.generic_indexed_y(operand, "AND", &mut CPU::and);
+  }
+
+  pub fn clc(&mut self) {
+    self.flag_operation("CLC", &mut StatusRegister::clear_carry_bit);
+  }
+
+  pub fn cld(&mut self) {
+    self.flag_operation("CLD", &mut StatusRegister::clear_decimal_bit);
+  }
+
+  pub fn cli(&mut self) {
+    self.flag_operation("CLI", &mut StatusRegister::clear_interrupt_bit);
+  }
+
+  pub fn clv(&mut self) {
+    self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
+  }
+
+  /// Loads the accumulator with the value given
+  ///
+  /// Affects flags N Z
+  pub fn lda(&mut self, value: u8) {
+    let message = "LDA";
+    trace!("{} called with value: 0x{:X}", message, value);
+    self.accumulator.set(value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
+    self.program_counter.advance(2);
+  }
+
+  pub fn lda_zero_page(&mut self, index: u8) {
+    self.generic_zero_page(index, "LDA", &mut CPU::lda);
+  }
+
+  pub fn lda_zero_page_x(&mut self, operand: u8) {
+    self.generic_zero_page_x(operand, "LDA", &mut CPU::lda_zero_page);
+  }
+
+  pub fn lda_absolute(&mut self, index: u16) {
+    self.generic_absolute(index, "LDA", &mut CPU::lda);
+  }
+
+  pub fn lda_absolute_x(&mut self, index: u16) {
+    self.generic_abs_x(index, "LDA", &mut CPU::lda);
+  }
+
+  pub fn lda_absolute_y(&mut self, index: u16) {
+    self.generic_abs_y(index, "LDA", &mut CPU::lda);
+  }
+
+  pub fn lda_indexed_x(&mut self, operand: u8) {
+    self.generic_indexed_x(operand, "LDA", &mut CPU::lda);
+  }
+
+  pub fn lda_indexed_y(&mut self, operand: u8) {
+    self.generic_indexed_y(operand, "LDA", &mut CPU::lda);
+  }
+
+  /// Loads a value into the X register.
+  ///
+  /// Flags: N, Z
+  pub fn ldx(&mut self, value: u8) {
+    let message = "LDX";
+    trace!("{} called with value: 0x{:X}", message, value);
+    self.x_register.set(value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
+    self.program_counter.advance(2);
+  }
+
+  pub fn ldx_zero_page(&mut self, index: u8) {
+    self.generic_zero_page(index, "LDX", &mut CPU::ldx);
+  }
+
+  pub fn ldx_zero_page_y(&mut self, index: u8) {
+    self.generic_zero_page_y(index, "LDX", &mut CPU::ldx_zero_page);
+  }
+
+  pub fn ldx_absolute(&mut self, index: u16) {
+    self.generic_absolute(index, "LDX", &mut CPU::ldx);
+  }
+
+  pub fn ldx_absolute_y(&mut self, index: u16) {
+    self.generic_abs_y(index, "LDX", &mut CPU::ldx);
+  }
+
+  /// Loads a value into the Y register.
+  ///
+  /// Flags: N, Z
+  pub fn ldy(&mut self, value: u8) {
+    let message = "LDY";
+    trace!("{} called with value: 0x{:X}", message, value);
+    self.y_register.set(value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
+    self.program_counter.advance(2);
+  }
+
+  pub fn ldy_zero_page(&mut self, index: u8) {
+    self.generic_zero_page(index, "LDY", &mut CPU::ldy);
+  }
+
+  pub fn ldy_zero_page_x(&mut self, index: u8) {
+    self.generic_zero_page_x(index, "LDY", &mut CPU::ldy_zero_page);
+  }
+
+  pub fn ldy_absolute(&mut self, index: u16) {
+    self.generic_absolute(index, "LDY", &mut CPU::ldy);
+  }
+
+  pub fn ldy_absolute_x(&mut self, index: u16) {
+    self.generic_abs_x(index, "LDY", &mut CPU::ldy);
+  }
+
+  pub fn sec(&mut self) {
+    self.flag_operation("SEC", &mut StatusRegister::set_carry_bit);
+  }
+
+  pub fn sed(&mut self) {
+    self.flag_operation("SED", &mut StatusRegister::set_decimal_bit);
+  }
+
+  pub fn sei(&mut self) {
+    self.flag_operation("SEI", &mut StatusRegister::set_interrupt_bit);
   }
 
   pub fn sta_zero_page(&mut self, index: u8) {
@@ -248,133 +432,6 @@ impl CPU {
     );
     self.memory.set(index, self.accumulator.get());
     self.program_counter.advance(2);
-  }
-
-  fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
-    trace!("{} called", name);
-    cb(&mut self.status_register);
-    self.program_counter.advance(1);
-  }
-
-  pub fn clc(&mut self) {
-    self.flag_operation("CLC", &mut StatusRegister::clear_carry_bit);
-  }
-
-  pub fn sec(&mut self) {
-    self.flag_operation("SEC", &mut StatusRegister::set_carry_bit);
-  }
-
-  pub fn cld(&mut self) {
-    self.flag_operation("CLD", &mut StatusRegister::clear_decimal_bit);
-  }
-
-  pub fn sed(&mut self) {
-    self.flag_operation("SED", &mut StatusRegister::set_decimal_bit);
-  }
-
-  pub fn cli(&mut self) {
-    self.flag_operation("CLI", &mut StatusRegister::clear_interrupt_bit);
-  }
-
-  pub fn sei(&mut self) {
-    self.flag_operation("SEI", &mut StatusRegister::set_interrupt_bit);
-  }
-
-  pub fn clv(&mut self) {
-    self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
-  }
-
-  /// Loads the accumulator with the value given
-  ///
-  /// Affects flags N Z
-  pub fn lda(&mut self, value: u8) {
-    let message = "LDA";
-    trace!("{} called with value: 0x{:X}", message, value);
-    self.accumulator.set(value);
-    self.status_register.handle_n_flag(value, message);
-    self.status_register.handle_z_flag(value, message);
-    self.program_counter.advance(2);
-  }
-
-  pub fn lda_zero_page(&mut self, index: u8) {
-    self.generic_zero_page(index, "LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_zero_page_x(&mut self, operand: u8) {
-    self.generic_zero_page_x(operand, "LDA", &mut CPU::lda_zero_page);
-  }
-
-  pub fn lda_absolute(&mut self, index: u16) {
-    self.generic_absolute(index, "LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute_x(&mut self, index: u16) {
-    self.generic_abs_x(index, "LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute_y(&mut self, index: u16) {
-    self.generic_abs_y(index, "LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_indexed_x(&mut self, operand: u8) {
-    self.generic_indexed_x(operand, "LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_indexed_y(&mut self, operand: u8) {
-    self.generic_indexed_y(operand, "LDA", &mut CPU::lda);
-  }
-
-  /// Loads a value into the X register.
-  ///
-  /// Flags: N, Z
-  pub fn ldx(&mut self, value: u8) {
-    let message = "LDX";
-    trace!("{} called with value: 0x{:X}", message, value);
-    self.x_register.set(value);
-    self.status_register.handle_n_flag(value, message);
-    self.status_register.handle_z_flag(value, message);
-    self.program_counter.advance(2);
-  }
-
-  pub fn ldx_zero_page(&mut self, index: u8) {
-    self.generic_zero_page(index, "LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_zero_page_y(&mut self, index: u8) {
-    self.generic_zero_page_y(index, "LDX", &mut CPU::ldx_zero_page);
-  }
-
-  pub fn ldx_absolute(&mut self, index: u16) {
-    self.generic_absolute(index, "LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_absolute_y(&mut self, index: u16) {
-    self.generic_abs_y(index, "LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldy(&mut self, value: u8) {
-    let message = "LDY";
-    trace!("{} called with value: 0x{:X}", message, value);
-    self.y_register.set(value);
-    self.status_register.handle_n_flag(value, message);
-    self.status_register.handle_z_flag(value, message);
-    self.program_counter.advance(2);
-  }
-
-  pub fn ldy_zero_page(&mut self, index: u8) {
-    self.generic_zero_page(index, "LDY", &mut CPU::ldy);
-  }
-
-  pub fn ldy_zero_page_x(&mut self, index: u8) {
-    self.generic_zero_page_x(index, "LDY", &mut CPU::ldy_zero_page);
-  }
-
-  pub fn ldy_absolute(&mut self, index: u16) {
-    self.generic_absolute(index, "LDY", &mut CPU::ldy);
-  }
-
-  pub fn ldy_absolute_x(&mut self, index: u16) {
-    self.generic_abs_x(index, "LDY", &mut CPU::ldy);
   }
 }
 
@@ -742,5 +799,61 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.sei();
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
+  }
+
+  #[test]
+  fn and() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x69);
+    cpu.and(0x57);
+    assert_eq!(cpu.accumulator.get(), 0x41);
+  }
+
+  #[test]
+  fn and_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x69);
+    cpu.memory.set_zero_page(0x57, 0xAC);
+    cpu.and_zero_page(0x57);
+    assert_eq!(cpu.accumulator.get(), 0x28);
+  }
+
+  #[test]
+  fn and_zero_page_x() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x69);
+    cpu.x_register.set(0x08);
+    cpu.memory.set_zero_page(0x5F, 0xAC);
+    cpu.and_zero_page_x(0x57);
+    assert_eq!(cpu.accumulator.get(), 0x28);
+  }
+
+  #[test]
+  fn and_absolute() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x34);
+    cpu.memory.set(0x1234, 0x56);
+    cpu.and_absolute(0x1234);
+    assert_eq!(cpu.accumulator.get(), 0x14);
+  }
+
+  #[test]
+  fn and_absolute_x() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x34);
+    cpu.memory.set(0x1254, 0x56);
+    cpu.x_register.set(0x20);
+    cpu.and_absolute_x(0x1234);
+    assert_eq!(cpu.accumulator.get(), 0x14);
+  }
+
+  #[test]
+  fn and_absolute_y() {
+    let mut cpu = CPU::new();
+    cpu.accumulator.set(0x34);
+    cpu.memory.set(0x1254, 0x56);
+    cpu.y_register.set(0x20);
+    cpu.and_absolute_y(0x1234);
+    assert_eq!(cpu.accumulator.get(), 0x14);
   }
 }
