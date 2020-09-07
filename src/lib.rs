@@ -174,7 +174,10 @@ impl CPU {
       true => 1,
       false => 0,
     };
-    let (result, carry) = self.accumulator.get().overflowing_add(value + modifier);
+    let (result, carry) = self
+      .accumulator
+      .get()
+      .overflowing_add(value.wrapping_add(modifier));
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_v_flag(result, message, carry);
@@ -270,26 +273,31 @@ impl CPU {
   pub fn asl_accumulator(&mut self) {
     let result = self.asl(self.accumulator.get());
     self.accumulator.set(result);
+    self.program_counter.advance(1);
   }
 
   pub fn asl_zero_page(&mut self, index: u8) {
     let result = self.zp_return(index, "ASL", &mut CPU::asl);
     self.memory.set_zero_page(index, result);
+    self.program_counter.advance(2);
   }
 
   pub fn asl_zero_page_x(&mut self, operand: u8) {
     self.generic_zero_page_x(operand, "ASL", &mut CPU::asl_zero_page);
+    self.program_counter.advance(2);
   }
 
   pub fn asl_absolute(&mut self, index: u16) {
     let result = self.abs_return(index, "ASL", &mut CPU::asl);
     self.memory.set(index, result);
+    self.program_counter.advance(2);
   }
 
   pub fn asl_absolute_x(&mut self, index: u16) {
     let result = self.abs_x_ret(index, "ASL", &mut CPU::asl);
     let index = index + self.x_register.get() as u16;
     self.memory.set(index, result);
+    self.program_counter.advance(2);
   }
 
   /// Tests a value and sets flags accordingly.
@@ -311,10 +319,12 @@ impl CPU {
 
   pub fn bit_zero_page(&mut self, index: u8) {
     self.bit(self.memory.get_zero_page(index));
+    self.program_counter.advance(2);
   }
 
   pub fn bit_absolute(&mut self, index: u16) {
     self.bit(self.memory.get_u16(index));
+    self.program_counter.advance(3);
   }
 
   pub fn clc(&mut self) {
@@ -534,6 +544,23 @@ impl Display for CPU {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use rand::distributions::uniform::SampleUniform;
+  use rand::prelude::*;
+  use rand::{thread_rng, Rng};
+  use test_case::test_case;
+
+  fn rand_range<T: SampleUniform>(min: T, max: T) -> T {
+    let mut rng = thread_rng();
+    rng.gen_range(min, max)
+  }
+
+  fn no_wrap() -> u8 {
+    rand_range(0x0, 0x7F)
+  }
+
+  fn wrap() -> u8 {
+    rand_range(0x7F, 0xFF)
+  }
 
   #[test]
   fn create_new_cpu() {
@@ -562,79 +589,192 @@ mod tests {
     assert_eq!(cpu.y_register.get(), 0);
   }
 
-  #[test]
-  fn adc_basic() {
+  fn setup(acc: u8) -> CPU {
     let mut cpu = CPU::new();
-    cpu.accumulator.set(0xAA);
-    cpu.adc(0x11);
-    assert_eq!(cpu.accumulator.get(), 0xAA + 0x11);
+    cpu.accumulator.set(acc);
+    cpu
   }
 
-  #[test]
-  fn adc_with_carry() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x00);
-    cpu.status_register.set_carry_bit();
-    cpu.adc(0x11);
-    assert_eq!(cpu.accumulator.get(), 0x12);
+  fn setup_zp(acc: u8, index: u8, value: u8) -> CPU {
+    let mut cpu = setup(acc);
+    cpu.memory.set_zero_page(index, value);
+    cpu
   }
 
-  #[test]
-  fn adc_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x12, 10);
-    cpu.accumulator.set(0x32);
-    cpu.adc_zero_page(0x12);
-    assert_eq!(cpu.accumulator.get(), 0x32 + 10);
+  fn setup_abs(acc: u8, index: u16, value: u8) -> CPU {
+    let mut cpu = setup(acc);
+    cpu.memory.set(index, value);
+    cpu
   }
 
-  #[test]
-  fn adc_zero_page_indexed_no_wrap() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x32);
-    cpu.x_register.set(0x11);
-    cpu.memory.set(0x23, 48);
-    cpu.adc_zero_page_x(0x12);
-    assert_eq!(cpu.accumulator.get(), 0x32 + 48);
+  fn setup_indexed(acc: u8, index: u16, value: u8, v1: u8, v2: u8, op: u8, reg_v: u8) -> CPU {
+    let mut cpu = setup(acc);
+    cpu.memory.set(index, value);
+    cpu.memory.set(op.wrapping_add(reg_v) as u16, v1);
+    cpu
+      .memory
+      .set(op.wrapping_add(reg_v).wrapping_add(1) as u16, v2);
+    cpu
   }
 
-  #[test]
-  fn adc_zero_page_indexed_wrap() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x32);
-    cpu.x_register.set(0x11);
-    cpu.memory.set(0x10, 48);
-    cpu.adc_zero_page_x(0xFF);
-    assert_eq!(cpu.accumulator.get(), 0x32 + 48);
+  fn setup_carry(cpu: &mut CPU, carry: u8) {
+    if carry > 0 {
+      cpu.status_register.set_carry_bit();
+    }
   }
 
-  #[test]
-  fn adc_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1234, 0x56);
-    cpu.accumulator.set(0x10);
-    cpu.adc_absolute(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x56 + 0x10);
+  #[test_case(no_wrap(), no_wrap(), 0; "adc without wrap without carry set")]
+  #[test_case(wrap(), wrap(), 0; "adc with wrap without carry set")]
+  #[test_case(no_wrap(), no_wrap(), 1; "adc without wrap with carry set")]
+  #[test_case(wrap(), wrap(), 1; "adc with wrap with carry set")]
+  fn adc(acc: u8, operand: u8, carry: u8) {
+    let mut cpu = setup(acc);
+    setup_carry(&mut cpu, carry);
+    cpu.adc(operand);
+    assert_eq!(
+      cpu.accumulator.get(),
+      acc.wrapping_add(operand).wrapping_add(carry)
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn adc_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1234 + 0x56, 0x56);
-    cpu.x_register.set(0x56);
-    cpu.accumulator.set(0x10);
-    cpu.adc_absolute_x(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x56 + 0x10);
+  #[test_case(no_wrap(), random(), no_wrap(), 0; "zero page without wrap without carry")]
+  #[test_case(wrap(), random(), wrap(), 0; "zero page with wrap without carry")]
+  #[test_case(no_wrap(), random(), no_wrap(), 1; "zero page without wrap with carry")]
+  #[test_case(wrap(), random(), wrap(), 1; "zero page with wrap with carry")]
+  fn adc_zero_page(acc: u8, index: u8, value: u8, carry: u8) {
+    let mut cpu = setup_zp(acc, index, value);
+    setup_carry(&mut cpu, carry);
+    cpu.adc_zero_page(index);
+    assert_eq!(
+      cpu.accumulator.get(),
+      acc.wrapping_add(value).wrapping_add(carry)
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn adc_absolute_y() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x5678 + 0x12, 0x90);
-    cpu.y_register.set(0x12);
-    cpu.accumulator.set(0xA0);
-    cpu.adc_absolute_y(0x5678);
-    assert_eq!(cpu.accumulator.get(), 0x30);
+  #[test_case(no_wrap(), random(), random(), no_wrap(), 0; "indexed zero page without wrap without carry")]
+  #[test_case(wrap(), random(), random(), wrap(), 0; "indexed zero page with wrap without carry")]
+  #[test_case(no_wrap(), random(), random(), no_wrap(), 1; "indexed zero page without wrap with carry")]
+  #[test_case(wrap(), random(), random(), wrap(), 1; "indexed zero page with wrap with carry")]
+  fn adc_zero_page_x(acc: u8, operand: u8, x: u8, value: u8, carry: u8) {
+    let mut cpu = setup_zp(acc, x.wrapping_add(operand), value);
+    setup_carry(&mut cpu, carry);
+    cpu.x_register.set(x);
+    cpu.adc_zero_page_x(operand);
+    assert_eq!(
+      cpu.accumulator.get(),
+      acc.wrapping_add(value).wrapping_add(carry)
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), no_wrap(), no_wrap(), 0; "absolute without wrap without carry")]
+  #[test_case(random(), wrap(), wrap(), 0; "absolute with wrap without carry")]
+  #[test_case(random(), no_wrap(), no_wrap(), 1; "absolute without wrap with carry")]
+  #[test_case(random(), wrap(), wrap(), 1; "absolute with wrap with carry")]
+  fn adc_absolute(index: u16, value: u8, acc: u8, carry: u8) {
+    let mut cpu = setup_abs(acc, index, value);
+    setup_carry(&mut cpu, carry);
+    cpu.adc_absolute(index);
+    assert_eq!(
+      cpu.accumulator.get(),
+      value.wrapping_add(acc).wrapping_add(carry)
+    );
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(no_wrap(), random(), random(), no_wrap(), 0; "absolute x without wrap without carry")]
+  #[test_case(wrap(), random(), random(), wrap(), 0; "absolute x with wrap without carry")]
+  #[test_case(no_wrap(), random(), random(), no_wrap(), 1; "absolute x without wrap with carry")]
+  #[test_case(wrap(), random(), random(), wrap(), 1; "absolute x with wrap with carry")]
+  fn adc_absolute_x(acc: u8, index: u16, x: u8, value: u8, carry: u8) {
+    let mut cpu = setup_abs(acc, index + x as u16, value);
+    setup_carry(&mut cpu, carry);
+    cpu.x_register.set(x);
+    cpu.adc_absolute_x(index);
+    assert_eq!(cpu.accumulator.get(), value.wrapping_add(acc) + carry);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(no_wrap(), random(), random(), no_wrap(), 0; "absolute y without wrap without carry")]
+  #[test_case(wrap(), random(), random(), wrap(), 0; "absolute y with wrap without carry")]
+  #[test_case(no_wrap(), random(), random(), no_wrap(), 1; "absolute y without wrap with carry")]
+  #[test_case(wrap(), random(), random(), wrap(), 1; "absolute y with wrap with carry")]
+  fn adc_absolute_y(acc: u8, index: u16, y: u8, value: u8, carry: u8) {
+    let mut cpu = setup_abs(acc, index + y as u16, value);
+    setup_carry(&mut cpu, carry);
+    cpu.y_register.set(y);
+    cpu.adc_absolute_y(index);
+    assert_eq!(cpu.accumulator.get(), value.wrapping_add(acc) + carry);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(no_wrap(), random(), random(), 0x30, 0x40, 0x4030, no_wrap(), 0; "indexed x without wrap without carry")]
+  #[test_case(wrap(), random(), random(), 0x30, 0x40, 0x4030, wrap(), 0; "indexed x with wrap without carry")]
+  #[test_case(no_wrap(), random(), random(), 0x30, 0x40, 0x4030, no_wrap(), 1; "indexed x without wrap with carry")]
+  #[test_case(wrap(), random(), random(), 0x30, 0x40, 0x4030, wrap(), 1; "indexed x with wrap with carry")]
+  fn adc_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, index: u16, value: u8, carry: u8) {
+    let mut cpu = setup_indexed(acc, index, value, v1, v2, operand, x);
+    setup_carry(&mut cpu, carry);
+    cpu.x_register.set(x);
+    cpu.adc_indexed_x(operand);
+    assert_eq!(
+      cpu.accumulator.get(),
+      value.wrapping_add(acc).wrapping_add(carry)
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random())]
+  fn and_basic(acc: u8, operand: u8) {
+    let mut cpu = setup(acc);
+    cpu.and(operand);
+    assert_eq!(cpu.accumulator.get(), acc & operand);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn and_zero_page(acc: u8, index: u8, value: u8) {
+    let mut cpu = setup_zp(acc, index, value);
+    cpu.and_zero_page(index);
+    assert_eq!(cpu.accumulator.get(), acc & value);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random(), random())]
+  fn and_zero_page_x(acc: u8, index: u8, value: u8, x: u8) {
+    let mut cpu = setup_zp(acc, index.wrapping_add(x), value);
+    cpu.x_register.set(x);
+    cpu.and_zero_page_x(index);
+    assert_eq!(cpu.accumulator.get(), acc & value);
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn and_absolute(acc: u8, index: u16, value: u8) {
+    let mut cpu = setup_abs(acc, index, value);
+    cpu.and_absolute(index);
+    assert_eq!(cpu.accumulator.get(), acc & value);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), random(), random(), random())]
+  fn and_absolute_x(acc: u8, index: u16, value: u8, x: u8) {
+    let mut cpu = setup_abs(acc, index.wrapping_add(x as u16), value);
+    cpu.x_register.set(x);
+    cpu.and_absolute_x(index);
+    assert_eq!(cpu.accumulator.get(), acc & value);
+    assert_eq!(cpu.program_counter.get(), 3);
+  }
+
+  #[test_case(random(), random(), random(), random())]
+  fn and_absolute_y(acc: u8, index: u16, value: u8, y: u8) {
+    let mut cpu = setup_abs(acc, index.wrapping_add(y as u16), value);
+    cpu.y_register.set(y);
+    cpu.and_absolute_y(index);
+    assert_eq!(cpu.accumulator.get(), acc & value);
+    assert_eq!(cpu.program_counter.get(), 3);
   }
 
   #[test]
@@ -885,62 +1025,6 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.sei();
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
-  }
-
-  #[test]
-  fn and() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x69);
-    cpu.and(0x57);
-    assert_eq!(cpu.accumulator.get(), 0x41);
-  }
-
-  #[test]
-  fn and_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x69);
-    cpu.memory.set_zero_page(0x57, 0xAC);
-    cpu.and_zero_page(0x57);
-    assert_eq!(cpu.accumulator.get(), 0x28);
-  }
-
-  #[test]
-  fn and_zero_page_x() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x69);
-    cpu.x_register.set(0x08);
-    cpu.memory.set_zero_page(0x5F, 0xAC);
-    cpu.and_zero_page_x(0x57);
-    assert_eq!(cpu.accumulator.get(), 0x28);
-  }
-
-  #[test]
-  fn and_absolute() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x34);
-    cpu.memory.set(0x1234, 0x56);
-    cpu.and_absolute(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x14);
-  }
-
-  #[test]
-  fn and_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x34);
-    cpu.memory.set(0x1254, 0x56);
-    cpu.x_register.set(0x20);
-    cpu.and_absolute_x(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x14);
-  }
-
-  #[test]
-  fn and_absolute_y() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x34);
-    cpu.memory.set(0x1254, 0x56);
-    cpu.y_register.set(0x20);
-    cpu.and_absolute_y(0x1234);
-    assert_eq!(cpu.accumulator.get(), 0x14);
   }
 
   #[test]

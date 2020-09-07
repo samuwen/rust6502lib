@@ -68,6 +68,7 @@ impl StatusRegister {
     self.unset_status_register(StatusBit::Interrupt);
   }
 
+  #[allow(dead_code)]
   pub fn set_break_bit(&mut self) {
     self.set_status_register(StatusBit::Break);
   }
@@ -76,6 +77,7 @@ impl StatusRegister {
     self.is_bit_set(StatusBit::Break)
   }
 
+  #[allow(dead_code)]
   pub fn clear_break_bit(&mut self) {
     self.unset_status_register(StatusBit::Break);
   }
