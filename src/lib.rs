@@ -292,6 +292,31 @@ impl CPU {
     self.memory.set(index, result);
   }
 
+  /// Tests a value and sets flags accordingly.
+  ///
+  /// Zero is set by looking at the result of the value AND with the accumulator.
+  /// N & V are set by bits 7 & 6 of the value respectively.
+  ///
+  /// Affects flags N V Z
+  fn bit(&mut self, value_to_test: u8) {
+    let n_result = self.accumulator.get() & value_to_test;
+    self.status_register.handle_n_flag(value_to_test, "BIT");
+    self.status_register.handle_z_flag(n_result, "BIT");
+    if (value_to_test & 0x40) >> 6 == 1 {
+      self.status_register.set_overflow_bit();
+    } else {
+      self.status_register.clear_overflow_bit();
+    }
+  }
+
+  pub fn bit_zero_page(&mut self, index: u8) {
+    self.bit(self.memory.get_zero_page(index));
+  }
+
+  pub fn bit_absolute(&mut self, index: u16) {
+    self.bit(self.memory.get_u16(index));
+  }
+
   pub fn clc(&mut self) {
     self.flag_operation("CLC", &mut StatusRegister::clear_carry_bit);
   }
@@ -965,5 +990,55 @@ mod tests {
     cpu.x_register.set(0x38);
     cpu.asl_absolute_x(0x9BB9);
     assert_eq!(cpu.memory.get_u16(0x9BF1), 0xBA);
+  }
+
+  #[test]
+  fn bit_zero_bit() {
+    let mut cpu = CPU::new();
+    cpu.bit(0);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
+    cpu.accumulator.set(0xFF);
+    cpu.bit(0xFF);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+  }
+
+  #[test]
+  fn bit_overflow_bit() {
+    let mut cpu = CPU::new();
+    cpu.bit(0);
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
+    cpu.bit(0xFF);
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
+  }
+
+  #[test]
+  fn bit_negative_bit() {
+    let mut cpu = CPU::new();
+    cpu.bit(0);
+    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
+    cpu.bit(0xFF);
+    assert_eq!(cpu.status_register.is_negative_bit_set(), true);
+  }
+
+  #[test]
+  fn bit_zero_page() {
+    let mut cpu = CPU::new();
+    cpu.memory.set_zero_page(0x65, 0x55);
+    cpu.accumulator.set(0xAA);
+    cpu.bit_zero_page(0x65);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
+    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
+  }
+
+  #[test]
+  fn bit_absolute() {
+    let mut cpu = CPU::new();
+    cpu.memory.set(0x6556, 0x55);
+    cpu.accumulator.set(0xAA);
+    cpu.bit_absolute(0x6556);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), true);
+    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
+    assert_eq!(cpu.status_register.is_overflow_bit_set(), true);
   }
 }
