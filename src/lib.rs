@@ -1094,110 +1094,113 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test]
-  fn ldy() {
+  #[test_case(random())]
+  fn ldy(val: u8) {
     let mut cpu = CPU::new();
-    cpu.ldy(0x11);
-    assert_eq!(cpu.y_register.get(), 0x11);
+    cpu.ldy(val);
+    assert_eq!(cpu.y_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn ldy_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x39, 0x11);
-    cpu.ldy_zero_page(0x39);
-    assert_eq!(cpu.y_register.get(), 0x11);
+  #[test_case(random(), random())]
+  fn ldy_zero_page(index: u8, val: u8) {
+    let mut cpu = setup_zp(0, index, val);
+    cpu.ldy_zero_page(index);
+    assert_eq!(cpu.y_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn ldy_zero_page_x() {
-    let mut cpu = CPU::new();
-    cpu.x_register.set(0x75);
-    cpu.memory.set_zero_page(0x32 + 0x75, 0x12);
-    cpu.ldy_zero_page_x(0x32);
-    assert_eq!(cpu.y_register.get(), 0x12);
+  #[test_case(random(), random(), random())]
+  fn ldy_zero_page_x(index: u8, val: u8, x: u8) {
+    let mut cpu = setup_zp(0, index.wrapping_add(x), val);
+    cpu.x_register.set(x);
+    cpu.ldy_zero_page_x(index);
+    assert_eq!(cpu.y_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn ldy_absolute() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1234, 0x56);
-    cpu.ldy_absolute(0x1234);
-    assert_eq!(cpu.y_register.get(), 0x56);
+  #[test_case(random(), random())]
+  fn ldy_absolute(index: u16, val: u8) {
+    let mut cpu = setup_abs(0, index, val);
+    cpu.ldy_absolute(index);
+    assert_eq!(cpu.y_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test]
-  fn ldy_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.memory.set(0x1254, 0x56);
-    cpu.x_register.set(0x20);
-    cpu.ldy_absolute_x(0x1234);
-    assert_eq!(cpu.y_register.get(), 0x56);
+  #[test_case(random(), random(), random())]
+  fn ldy_absolute_x(index: u16, val: u8, x: u8) {
+    let mut cpu = setup_abs(0, index.wrapping_add(x as u16), val);
+    cpu.x_register.set(x);
+    cpu.ldy_absolute_x(index);
+    assert_eq!(cpu.y_register.get(), val);
+    assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test]
-  fn sta_zero_page() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x34);
-    cpu.sta_zero_page(0x55);
-    assert_eq!(cpu.memory.get_zero_page(0x55), 0x34);
+  #[test_case(random(), random())]
+  fn sta_zero_page(val: u8, index: u8) {
+    let mut cpu = setup(val);
+    cpu.sta_zero_page(index);
+    assert_eq!(cpu.memory.get_zero_page(index), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn sta_zero_page_x() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x99);
-    cpu.x_register.set(0x34);
-    cpu.sta_zero_page_x(0x55);
-    assert_eq!(cpu.memory.get_zero_page(0x55 + 0x34), 0x99);
+  #[test_case(random(), random(), random())]
+  fn sta_zero_page_x(val: u8, index: u8, x: u8) {
+    let mut cpu = setup(val);
+    cpu.x_register.set(x);
+    cpu.sta_zero_page_x(index);
+    assert_eq!(cpu.memory.get_zero_page(index.wrapping_add(x)), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn sta_absolute() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x99);
-    cpu.sta_absolute(0x1255);
-    assert_eq!(cpu.memory.get_u16(0x1255), 0x99);
+  #[test_case(random(), random())]
+  fn sta_absolute(val: u8, index: u16) {
+    let mut cpu = setup(val);
+    cpu.sta_absolute(index);
+    assert_eq!(cpu.memory.get_u16(index), val);
+    assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test]
-  fn sta_absolute_x() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x99);
-    cpu.x_register.set(0x10);
-    cpu.sta_absolute_x(0x1255);
-    assert_eq!(cpu.memory.get_u16(0x1265), 0x99);
+  #[test_case(random(), random(), random())]
+  fn sta_absolute_x(val: u8, index: u16, x: u8) {
+    let mut cpu = setup(val);
+    cpu.x_register.set(x);
+    cpu.sta_absolute_x(index);
+    assert_eq!(cpu.memory.get_u16(index.wrapping_add(x as u16)), val);
+    assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test]
-  fn sta_absolute_y() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x99);
-    cpu.y_register.set(0x20);
-    cpu.sta_absolute_y(0x1275);
-    assert_eq!(cpu.memory.get_u16(0x1295), 0x99);
+  #[test_case(random(), random(), random())]
+  fn sta_absolute_y(val: u8, index: u16, y: u8) {
+    let mut cpu = setup(val);
+    cpu.y_register.set(y);
+    cpu.sta_absolute_y(index);
+    assert_eq!(cpu.memory.get_u16(index.wrapping_add(y as u16)), val);
+    assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test]
-  fn sta_indexed_x() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x99);
-    cpu.x_register.set(0x20);
-    cpu.memory.set(0x32, 0x20);
-    cpu.memory.set(0x33, 0x25);
-    cpu.sta_indexed_x(0x12);
-    assert_eq!(cpu.memory.get_u16(0x2520), 0x99);
+  #[test_case(random(), random(), random(), 0x20, 0x25, 0x2520)]
+  fn sta_indexed_x(val: u8, x: u8, op: u8, v1: u8, v2: u8, index: u16) {
+    let mut cpu = setup(val);
+    cpu.x_register.set(x);
+    cpu.memory.set_zero_page(op.wrapping_add(x), v1);
+    cpu
+      .memory
+      .set_zero_page(op.wrapping_add(x).wrapping_add(1), v2);
+    cpu.sta_indexed_x(op);
+    assert_eq!(cpu.memory.get_u16(index), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test]
-  fn sta_indexed_y() {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(0x45);
-    cpu.y_register.set(0x20);
-    cpu.memory.set(0x12, 0x57);
-    cpu.memory.set(0x13, 0xCB);
-    cpu.sta_indexed_y(0x12);
-    assert_eq!(cpu.memory.get_u16(0xCB77), 0x45);
+  #[test_case(random(), random(), random(), 0x57, 0xCB, 0xCB57)]
+  fn sta_indexed_y(val: u8, y: u8, op: u8, v1: u8, v2: u8, index: u16) {
+    let mut cpu = setup(val);
+    cpu.y_register.set(y);
+    cpu.memory.set_zero_page(op, v1);
+    cpu.memory.set_zero_page(op.wrapping_add(1), v2);
+    cpu.sta_indexed_y(op);
+    assert_eq!(cpu.memory.get_u16(index.wrapping_add(y as u16)), val);
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
   #[test]
@@ -1205,6 +1208,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.sec();
     assert_eq!(cpu.status_register.is_carry_bit_set(), true);
+    assert_eq!(cpu.program_counter.get(), 1);
   }
 
   #[test]
@@ -1212,6 +1216,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.sed();
     assert_eq!(cpu.status_register.is_decimal_bit_set(), true);
+    assert_eq!(cpu.program_counter.get(), 1);
   }
 
   #[test]
@@ -1219,5 +1224,6 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.sei();
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
+    assert_eq!(cpu.program_counter.get(), 1);
   }
 }
