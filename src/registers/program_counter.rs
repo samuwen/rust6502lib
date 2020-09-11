@@ -15,6 +15,15 @@ impl ProgramCounter {
     self.value as usize
   }
 
+  pub fn set(&mut self, value: u16) {
+    self.value = value;
+  }
+
+  pub fn get_next(&mut self) -> usize {
+    self.advance(1);
+    self.value as usize
+  }
+
   pub fn advance(&mut self, amount: u16) {
     self.value += amount;
   }

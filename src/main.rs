@@ -16,7 +16,7 @@ fn main() {
   if &pattern == "parser" {
     debug!("Initialized in parser mode");
     let mut parser = parser::Parser::new();
-    parser.run();
+  // parser.run();
   } else {
     debug!("Initialized in program mode");
     let program = vec![0xA9, 0x10, 0x69, 0x10];
