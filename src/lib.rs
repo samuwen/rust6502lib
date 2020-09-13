@@ -469,7 +469,8 @@ impl CPU {
     self.flag_operation("SEI", &mut StatusRegister::set_interrupt_bit);
   }
 
-  pub fn sta_zero_page(&mut self, index: u8) {
+  pub fn sta_zero_page(&mut self) {
+    let index = self.program_counter.get_single_operand(&self.memory);
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
       self.accumulator.get(),
@@ -478,37 +479,22 @@ impl CPU {
     self.memory.set_zero_page(index, self.accumulator.get());
   }
 
-  pub fn sta_zero_page_x(&mut self, operand: u8) {
-    let index = operand.wrapping_add(self.x_register.get());
+  pub fn sta_zero_page_x(&mut self) {
+    let index = self.program_counter.get_single_operand(&self.memory);
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
       self.accumulator.get(),
       index
     );
-    self.memory.set_zero_page(index, self.accumulator.get());
-  }
-
-  pub fn sta_absolute(&mut self, index: u16) {
-    trace!(
-      "STA storing 0x{:X} at 0x{:X}",
+    self.memory.set_zero_page(
+      index.wrapping_add(self.x_register.get()),
       self.accumulator.get(),
-      index
     );
-    self.memory.set(index, self.accumulator.get());
   }
 
-  pub fn sta_absolute_x(&mut self, index: u16) {
-    let index = index + self.x_register.get() as u16;
-    trace!(
-      "STA storing 0x{:X} at 0x{:X}",
-      self.accumulator.get(),
-      index
-    );
-    self.memory.set(index, self.accumulator.get());
-  }
-
-  pub fn sta_absolute_y(&mut self, index: u16) {
-    let index = index + self.y_register.get() as u16;
+  pub fn sta_absolute(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops);
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
       self.accumulator.get(),
@@ -517,7 +503,30 @@ impl CPU {
     self.memory.set(index, self.accumulator.get());
   }
 
-  pub fn sta_indexed_x(&mut self, operand: u8) {
+  pub fn sta_absolute_x(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops).wrapping_add(self.x_register.get() as u16);
+    trace!(
+      "STA storing 0x{:X} at 0x{:X}",
+      self.accumulator.get(),
+      index
+    );
+    self.memory.set(index, self.accumulator.get());
+  }
+
+  pub fn sta_absolute_y(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops).wrapping_add(self.y_register.get() as u16);
+    trace!(
+      "STA storing 0x{:X} at 0x{:X}",
+      self.accumulator.get(),
+      index
+    );
+    self.memory.set(index, self.accumulator.get());
+  }
+
+  pub fn sta_indexed_x(&mut self) {
+    let operand = self.program_counter.get_single_operand(&self.memory);
     let index = self
       .memory
       .get_pre_adjusted_index(operand, self.x_register.get());
@@ -906,21 +915,19 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[ignore]
   #[test_case(no_wrap(), no_wrap(), no_wrap(); "without shift wrap without index wrap")]
   #[test_case(no_wrap(), wrap(), no_wrap(); "with shift wrap without index wrap")]
   #[test_case(wrap(), no_wrap(), wrap(); "without shift wrap with index wrap")]
   #[test_case(wrap(), wrap(), wrap(); "with shift wrap with index wrap")]
   fn asl_zero_page_x(index: u8, value: u8, x: u8) {
     let mod_index = index.wrapping_add(x);
-    let mut cpu = setup_zp(0, mod_index, value);
+    let mut cpu = setup_zp_reg(0, index, x, value);
     cpu.x_register.set(x);
     cpu.asl_zero_page_x();
     assert_eq!(cpu.memory.get_zero_page(mod_index), value.wrapping_shl(1));
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[ignore]
   #[test_case(random(), no_wrap(); "without wrap")]
   #[test_case(random(), wrap(); "with wrap")]
   fn asl_absolute(index: u16, value: u8) {
@@ -930,19 +937,17 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test_case(random(), no_wrap(), no_wrap(); "without wrap")]
   #[test_case(random(), no_wrap(), wrap(); "with wrap")]
   fn asl_absolute_x(index: u16, value: u8, x: u8) {
     let mod_index = index.wrapping_add(x as u16);
-    let mut cpu = setup_abs(mod_index, value);
+    let mut cpu = setup_abs_reg(index, x, value);
     cpu.x_register.set(x);
     cpu.asl_absolute_x();
     assert_eq!(cpu.memory.get_u16(mod_index), value.wrapping_shl(1));
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test]
   fn bit_zero_bit() {
     let mut cpu = CPU::new();
@@ -965,7 +970,6 @@ mod tests {
     val & 0x80 > 0
   }
 
-  #[ignore]
   #[test_case(random())]
   fn bit_overflow_bit(val: u8) {
     let mut cpu = CPU::new();
@@ -976,7 +980,6 @@ mod tests {
     );
   }
 
-  #[ignore]
   #[test_case(random())]
   fn bit_negative_bit(val: u8) {
     let mut cpu = CPU::new();
@@ -987,7 +990,6 @@ mod tests {
     );
   }
 
-  #[ignore]
   #[test_case(random(), r_lsb(), random())]
   fn bit_zero_page(val: u8, index: u8, acc: u8) {
     let mut cpu = CPU::new();
@@ -1009,7 +1011,6 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[ignore]
   #[test_case(r_u16(), random(), random())]
   fn bit_absolute(index: u16, val: u8, acc: u8) {
     let mut cpu = CPU::new();
@@ -1119,7 +1120,6 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test_case(random())]
   fn ldx(val: u8) {
     let mut cpu = CPU::new();
@@ -1206,64 +1206,57 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test_case(random(), r_lsb())]
   fn sta_zero_page(val: u8, index: u8) {
-    let mut cpu = setup(val);
-    cpu.sta_zero_page(index);
+    let mut cpu = setup_zp(val, index, 0);
+    cpu.sta_zero_page();
     assert_eq!(cpu.memory.get_zero_page(index), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[ignore]
   #[test_case(random(), r_lsb(), random())]
   fn sta_zero_page_x(val: u8, index: u8, x: u8) {
-    let mut cpu = setup(val);
+    let mut cpu = setup_zp_reg(val, index, x, 0);
     cpu.x_register.set(x);
-    cpu.sta_zero_page_x(index);
+    cpu.sta_zero_page_x();
     assert_eq!(cpu.memory.get_zero_page(index.wrapping_add(x)), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[ignore]
   #[test_case(random(), r_u16())]
   fn sta_absolute(val: u8, index: u16) {
-    let mut cpu = setup(val);
-    cpu.sta_absolute(index);
+    let mut cpu = setup_abs(index, 0);
+    cpu.accumulator.set(val);
+    cpu.sta_absolute();
     assert_eq!(cpu.memory.get_u16(index), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test_case(random(), r_u16(), random())]
   fn sta_absolute_x(val: u8, index: u16, x: u8) {
-    let mut cpu = setup(val);
+    let mut cpu = setup_abs_reg(index, x, 0);
+    cpu.accumulator.set(val);
     cpu.x_register.set(x);
-    cpu.sta_absolute_x(index);
+    cpu.sta_absolute_x();
     assert_eq!(cpu.memory.get_u16(index.wrapping_add(x as u16)), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test_case(random(), r_u16(), random())]
   fn sta_absolute_y(val: u8, index: u16, y: u8) {
-    let mut cpu = setup(val);
+    let mut cpu = setup_abs_reg(index, y, 0);
+    cpu.accumulator.set(val);
     cpu.y_register.set(y);
-    cpu.sta_absolute_y(index);
+    cpu.sta_absolute_y();
     assert_eq!(cpu.memory.get_u16(index.wrapping_add(y as u16)), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[ignore]
   #[test_case(random(), random(), random(), random(), random(), r_u16())]
   fn sta_indexed_x(val: u8, x: u8, op: u8, v1: u8, v2: u8, index: u16) {
-    let mut cpu = setup(val);
+    let mut cpu = setup_indexed_x(val, 0, v1, v2, op, x);
     cpu.x_register.set(x);
-    cpu.memory.set_zero_page(op.wrapping_add(x), v1);
-    cpu
-      .memory
-      .set_zero_page(op.wrapping_add(x).wrapping_add(1), v2);
-    cpu.sta_indexed_x(op);
+    cpu.sta_indexed_x();
     assert_eq!(cpu.memory.get_u16(index), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
