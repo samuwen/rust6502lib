@@ -1,5 +1,3 @@
-use hex::encode;
-
 pub struct Memory {
   mem: [u8; 0xFFFF],
 }
@@ -45,10 +43,10 @@ impl Memory {
   }
 
   pub fn get_pre_adjusted_index(&self, operand: u8, register: u8) -> u16 {
-    let mut lsb = self.get_lsb(operand.wrapping_add(register));
-    let msb = self.get_msb(operand.wrapping_add(register));
-    lsb.push_str(&msb);
-    u16::from_str_radix(&lsb, 16).unwrap()
+    u16::from_le_bytes([
+      self.get_zero_page(operand.wrapping_add(register)),
+      self.get_zero_page(operand.wrapping_add(register).wrapping_add(1)),
+    ])
   }
 
   /// Computes a memory address, adds a register value, and returns the value contained within.
@@ -62,18 +60,11 @@ impl Memory {
   }
 
   pub fn get_post_adjusted_index(&self, operand: u8, register: u8) -> u16 {
-    let mut lsb = self.get_lsb(operand);
-    let msb = self.get_msb(operand);
-    lsb.push_str(&msb);
-    u16::from_str_radix(&lsb, 16).unwrap() + register as u16
-  }
-
-  pub fn get_msb(&self, index: u8) -> String {
-    encode(vec![self.mem[index as usize]])
-  }
-
-  pub fn get_lsb(&self, index: u8) -> String {
-    encode(vec![self.mem[(index + 1) as usize]])
+    let unadjusted_index = u16::from_le_bytes([
+      self.get_zero_page(operand),
+      self.get_zero_page(operand.wrapping_add(1)),
+    ]);
+    unadjusted_index.wrapping_add(register as u16)
   }
 }
 
@@ -161,19 +152,5 @@ mod tests {
     memory.mem[0x86] = 0x28;
     memory.mem[0x87] = 0x40;
     assert_eq!(memory.get_post_adjusted_index(0x86, 0x10), 0x4038);
-  }
-
-  #[test]
-  fn lsb() {
-    let mut memory = Memory::new();
-    memory.mem[0x50] = 0xFF;
-    assert_eq!(memory.get_lsb(0x4F), "ff");
-  }
-
-  #[test]
-  fn msb() {
-    let mut memory = Memory::new();
-    memory.mem[0x50] = 0xFF;
-    assert_eq!(memory.get_msb(0x50), "ff");
   }
 }
