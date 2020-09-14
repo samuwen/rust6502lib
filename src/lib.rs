@@ -179,9 +179,11 @@ impl CPU {
     let (result, carry) = reg_value.overflowing_sub(test_value);
     if result == 0 {
       self.status_register.set_zero_bit();
-    } else if !carry {
+    }
+    if !carry {
       self.status_register.set_carry_bit();
-    } else if (result & 0x80) > 0 {
+    }
+    if (result & 0x80) > 0 {
       self.status_register.set_negative_bit();
     }
   }
@@ -360,6 +362,38 @@ impl CPU {
 
   pub fn clv(&mut self) {
     self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
+  }
+
+  pub fn dec(&mut self, index: u16) {
+    let value = self.memory.get_u16(index);
+    let value = value.wrapping_sub(1);
+    self.memory.set(index, value);
+    self.status_register.handle_n_flag(value, "DEC");
+    self.status_register.handle_z_flag(value, "DEC");
+  }
+
+  pub fn dec_zp(&mut self) {
+    let index = self.program_counter.get_single_operand(&self.memory);
+    self.dec(index as u16);
+  }
+
+  pub fn dec_zp_reg(&mut self) {
+    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = index.wrapping_add(self.x_register.get());
+    self.dec(index as u16);
+  }
+
+  pub fn dec_abs(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops);
+    self.dec(index as u16);
+  }
+
+  pub fn dec_abs_x(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops);
+    let index = index.wrapping_add(self.x_register.get() as u16);
+    self.dec(index as u16);
   }
 
   /// Loads the accumulator with the value given
@@ -1018,7 +1052,7 @@ mod tests {
   fn get_branch_result(val: u8, pc_start: u8) -> u8 {
     match val > 0x7F {
       true => pc_start - (!val + 1),
-      false => pc_start + val,
+      false => pc_start.wrapping_add(val),
     }
   }
 
@@ -1207,12 +1241,59 @@ mod tests {
   }
 
   #[test_case(wrap(), no_wrap(); "Compare acc where acc is greater")]
+  #[test_case(no_wrap(), wrap(); "Compare acc where acc is lesser")]
+  #[test_case(0x10, 0x10; "Compare acc where vals are equal")]
   fn cmp_immediate(acc: u8, val: u8) {
     let mut cpu = setup(acc);
-    cpu.cmp(val);
-    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
-    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
-    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
+    cpu.program_counter.increase(1);
+    cpu.memory.set_zero_page(1, val);
+    cpu.immediate("CMP", &mut CPU::cmp);
+    let result = acc.wrapping_sub(val);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), acc == val);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), acc >= val);
+    assert_eq!(
+      cpu.status_register.is_negative_bit_set(),
+      (result & 0x80) > 0
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(wrap(), no_wrap(); "Compare x where x is greater")]
+  #[test_case(no_wrap(), wrap(); "Compare x where x is lesser")]
+  #[test_case(0x10, 0x10; "Compare x where vals are equal")]
+  fn cpx_immediate(x: u8, val: u8) {
+    let mut cpu = CPU::new();
+    cpu.program_counter.increase(1);
+    cpu.x_register.set(x);
+    cpu.memory.set_zero_page(1, val);
+    cpu.immediate("CPX", &mut CPU::cpx);
+    let result = x.wrapping_sub(val);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), x == val);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), x >= val);
+    assert_eq!(
+      cpu.status_register.is_negative_bit_set(),
+      (result & 0x80) > 0
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
+  }
+
+  #[test_case(wrap(), no_wrap(); "Compare y where y is greater")]
+  #[test_case(no_wrap(), wrap(); "Compare y where y is lesser")]
+  #[test_case(0x10, 0x10; "Compare y where vals are equal")]
+  fn cpy_immediate(y: u8, val: u8) {
+    let mut cpu = CPU::new();
+    cpu.y_register.set(y);
+    cpu.program_counter.increase(1);
+    cpu.memory.set_zero_page(1, val);
+    cpu.immediate("CPY", &mut CPU::cpy);
+    let result = y.wrapping_sub(val);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), y == val);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), y >= val);
+    assert_eq!(
+      cpu.status_register.is_negative_bit_set(),
+      (result & 0x80) > 0
+    );
+    assert_eq!(cpu.program_counter.get(), 2);
   }
 
   #[test_case(random())]
