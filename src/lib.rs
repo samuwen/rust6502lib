@@ -5,8 +5,10 @@ use log::trace;
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
+use std::time::Duration;
 
 const STARTING_MEMORY_BLOCK: u16 = 0x8000;
+const TIME_PER_CYCLE: u64 = 1790;
 
 /// An emulated CPU for the 6502 processor.
 pub struct CPU {
@@ -17,6 +19,7 @@ pub struct CPU {
   y_register: GeneralRegister,
   status_register: StatusRegister,
   memory: Memory,
+  cycle_counter: u8,
 }
 
 impl CPU {
@@ -31,6 +34,7 @@ impl CPU {
       y_register: GeneralRegister::new(),
       status_register: StatusRegister::new(),
       memory: Memory::new(),
+      cycle_counter: 0,
     }
   }
 
@@ -43,6 +47,7 @@ impl CPU {
     self.y_register.reset();
     self.status_register.reset();
     self.memory.reset();
+    self.cycle_counter = 0;
     trace!("CPU Reset")
   }
 
@@ -61,7 +66,9 @@ impl CPU {
     loop {
       let opcode = self.program_counter.get_single_operand(&self.memory);
       match opcode {
+        0x24 => self.zero_page("BIT", &mut CPU::bit),
         0x29 => self.immediate("AND", &mut CPU::and),
+        0x2C => self.absolute("BIT", &mut CPU::bit),
         0x61 => self.indexed_x("ADC", &mut CPU::adc),
         0x65 => self.zero_page("ADC", &mut CPU::adc),
         0x69 => self.immediate("ADC", &mut CPU::adc),
@@ -72,6 +79,9 @@ impl CPU {
         0x7D => self.absolute_y("ADC", &mut CPU::adc),
         _ => (),
       }
+      std::thread::sleep(Duration::from_micros(
+        self.cycle_counter as u64 * TIME_PER_CYCLE,
+      ));
     }
   }
 
@@ -149,7 +159,6 @@ impl CPU {
   fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
     trace!("{} called", name);
     cb(&mut self.status_register);
-    self.program_counter.advance(1);
   }
 
   /*
@@ -887,6 +896,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_carry_bit();
     cpu.clc();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_carry_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -896,6 +906,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_decimal_bit();
     cpu.cld();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_decimal_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -905,6 +916,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_interrupt_bit();
     cpu.cli();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -914,6 +926,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_overflow_bit();
     cpu.clv();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -1126,6 +1139,7 @@ mod tests {
   fn sec() {
     let mut cpu = CPU::new();
     cpu.sec();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_carry_bit_set(), true);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -1134,6 +1148,7 @@ mod tests {
   fn sed() {
     let mut cpu = CPU::new();
     cpu.sed();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_decimal_bit_set(), true);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -1142,6 +1157,7 @@ mod tests {
   fn sei() {
     let mut cpu = CPU::new();
     cpu.sei();
+    cpu.program_counter.advance(1);
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
     assert_eq!(cpu.program_counter.get(), 1);
   }
