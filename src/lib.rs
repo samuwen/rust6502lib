@@ -197,38 +197,6 @@ impl CPU {
     self.status_register.handle_c_flag(message, carry);
   }
 
-  /// Retrieves the value at zero page memory at index provided by the operand and adds it to the accumulator.
-  pub fn adc_zero_page(&mut self) {
-    self.zero_page("ADC", &mut CPU::adc);
-  }
-
-  /// Adds the value of the x register to the operand and uses the resulting index to retrieve a value
-  /// from zero page memory. Then adds this value to the accumulator.
-  pub fn adc_zero_page_x(&mut self) {
-    self.zp_reg("ADC", self.x_register.get(), &mut CPU::adc);
-  }
-
-  /// Retrieves the value at regular memory index and adds it to the accumulator.
-  pub fn adc_absolute(&mut self) {
-    self.absolute("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_absolute_x(&mut self) {
-    self.absolute_x("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_absolute_y(&mut self) {
-    self.absolute_y("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_indexed_x(&mut self) {
-    self.indexed_x("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_indexed_y(&mut self) {
-    self.indexed_y("ADC", &mut CPU::adc);
-  }
-
   /// Bitwise and operation performed against the accumulator
   ///
   /// Affects flags N Z
@@ -239,34 +207,6 @@ impl CPU {
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
-  }
-
-  pub fn and_zero_page(&mut self) {
-    self.zero_page("AND", &mut CPU::and);
-  }
-
-  pub fn and_zero_page_x(&mut self) {
-    self.zp_reg("AND", self.x_register.get(), &mut CPU::and);
-  }
-
-  pub fn and_absolute(&mut self) {
-    self.absolute("AND", &mut CPU::and);
-  }
-
-  pub fn and_absolute_x(&mut self) {
-    self.absolute_x("AND", &mut CPU::and);
-  }
-
-  pub fn and_absolute_y(&mut self) {
-    self.absolute_y("AND", &mut CPU::and);
-  }
-
-  pub fn and_indexed_x(&mut self) {
-    self.indexed_x("AND", &mut CPU::and);
-  }
-
-  pub fn and_indexed_y(&mut self) {
-    self.indexed_y("AND", &mut CPU::and);
   }
 
   /// Shifts all bits left one position
@@ -338,16 +278,6 @@ impl CPU {
     }
   }
 
-  pub fn bit_zero_page(&mut self, index: u8) {
-    self.bit(self.memory.get_zero_page(index));
-    self.program_counter.advance(2);
-  }
-
-  pub fn bit_absolute(&mut self, index: u16) {
-    self.bit(self.memory.get_u16(index));
-    self.program_counter.advance(3);
-  }
-
   pub fn clc(&mut self) {
     self.flag_operation("CLC", &mut StatusRegister::clear_carry_bit);
   }
@@ -375,34 +305,6 @@ impl CPU {
     self.status_register.handle_z_flag(value, message);
   }
 
-  pub fn lda_zero_page(&mut self) {
-    self.zero_page("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_zero_page_x(&mut self) {
-    self.zp_reg("LDA", self.x_register.get(), &mut CPU::lda);
-  }
-
-  pub fn lda_absolute(&mut self) {
-    self.absolute("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute_x(&mut self) {
-    self.absolute_x("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute_y(&mut self) {
-    self.absolute_y("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_indexed_x(&mut self) {
-    self.indexed_x("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_indexed_y(&mut self) {
-    self.indexed_y("LDA", &mut CPU::lda);
-  }
-
   /// Loads a value into the X register.
   ///
   /// Flags: N, Z
@@ -414,22 +316,6 @@ impl CPU {
     self.status_register.handle_z_flag(value, message);
   }
 
-  pub fn ldx_zero_page(&mut self) {
-    self.zero_page("LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_zero_page_y(&mut self) {
-    self.zp_reg("LDX", self.y_register.get(), &mut CPU::ldx);
-  }
-
-  pub fn ldx_absolute(&mut self) {
-    self.absolute("LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_absolute_y(&mut self) {
-    self.absolute_y("LDX", &mut CPU::ldx);
-  }
-
   /// Loads a value into the Y register.
   ///
   /// Flags: N, Z
@@ -439,22 +325,6 @@ impl CPU {
     self.y_register.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
-  }
-
-  pub fn ldy_zero_page(&mut self) {
-    self.zero_page("LDY", &mut CPU::ldy);
-  }
-
-  pub fn ldy_zero_page_x(&mut self) {
-    self.zp_reg("LDY", self.x_register.get(), &mut CPU::ldy);
-  }
-
-  pub fn ldy_absolute(&mut self) {
-    self.absolute("LDY", &mut CPU::ldy);
-  }
-
-  pub fn ldy_absolute_x(&mut self) {
-    self.absolute_x("LDY", &mut CPU::ldy);
   }
 
   pub fn sec(&mut self) {
@@ -712,7 +582,7 @@ mod tests {
   fn adc_zero_page(acc: u8, index: u8, value: u8, carry: u8) {
     let mut cpu = setup_zp(acc, index, value);
     setup_carry(&mut cpu, carry);
-    cpu.adc_zero_page();
+    cpu.zero_page("ADC", &mut CPU::adc);
     assert_eq!(
       cpu.accumulator.get(),
       acc.wrapping_add(value).wrapping_add(carry)
@@ -728,7 +598,7 @@ mod tests {
     let mut cpu = setup_zp_reg(acc, index, x, value);
     setup_carry(&mut cpu, carry);
     cpu.x_register.set(x);
-    cpu.adc_zero_page_x();
+    cpu.zp_reg("ADC", x, &mut CPU::adc);
     assert_eq!(
       cpu.accumulator.get(),
       acc.wrapping_add(value).wrapping_add(carry)
@@ -744,7 +614,7 @@ mod tests {
     let mut cpu = setup_abs(index, value);
     cpu.accumulator.set(acc);
     setup_carry(&mut cpu, carry);
-    cpu.adc_absolute();
+    cpu.absolute("ADC", &mut CPU::adc);
     assert_eq!(
       cpu.accumulator.get(),
       value.wrapping_add(acc).wrapping_add(carry)
@@ -761,7 +631,7 @@ mod tests {
     cpu.accumulator.set(acc);
     setup_carry(&mut cpu, carry);
     cpu.x_register.set(x);
-    cpu.adc_absolute_x();
+    cpu.absolute_x("ADC", &mut CPU::adc);
     assert_eq!(cpu.accumulator.get(), value.wrapping_add(acc) + carry);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -775,7 +645,7 @@ mod tests {
     cpu.accumulator.set(acc);
     setup_carry(&mut cpu, carry);
     cpu.y_register.set(y);
-    cpu.adc_absolute_y();
+    cpu.absolute_y("ADC", &mut CPU::adc);
     assert_eq!(cpu.accumulator.get(), value.wrapping_add(acc) + carry);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -791,7 +661,7 @@ mod tests {
     }
     setup_carry(&mut cpu, carry);
     cpu.x_register.set(x);
-    cpu.adc_indexed_x();
+    cpu.indexed_x("ADC", &mut CPU::adc);
     assert_eq!(
       cpu.accumulator.get(),
       value.wrapping_add(acc).wrapping_add(carry)
@@ -807,7 +677,7 @@ mod tests {
     let mut cpu = setup_indexed_y(acc, value, v1, v2, operand, x);
     setup_carry(&mut cpu, carry);
     cpu.y_register.set(x);
-    cpu.adc_indexed_y();
+    cpu.indexed_y("ADC", &mut CPU::adc);
     assert_eq!(
       cpu.accumulator.get(),
       value.wrapping_add(acc).wrapping_add(carry)
@@ -828,7 +698,7 @@ mod tests {
   #[test_case(random(), random(), random())]
   fn and_zero_page(acc: u8, index: u8, value: u8) {
     let mut cpu = setup_zp(acc, index, value);
-    cpu.and_zero_page();
+    cpu.zero_page("AND", &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), acc & value);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -837,7 +707,7 @@ mod tests {
   fn and_zero_page_x(acc: u8, index: u8, value: u8, x: u8) {
     let mut cpu = setup_zp_reg(acc, index, x, value);
     cpu.x_register.set(x);
-    cpu.and_zero_page_x();
+    cpu.zp_reg("AND", x, &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), acc & value);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -846,7 +716,7 @@ mod tests {
   fn and_absolute(acc: u8, index: u16, value: u8) {
     let mut cpu = setup_abs(index, value);
     cpu.accumulator.set(acc);
-    cpu.and_absolute();
+    cpu.absolute("AND", &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), acc & value);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -856,7 +726,7 @@ mod tests {
     let mut cpu = setup_abs_reg(index, x, value);
     cpu.accumulator.set(acc);
     cpu.x_register.set(x);
-    cpu.and_absolute_x();
+    cpu.absolute_x("AND", &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), acc & value);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -866,7 +736,7 @@ mod tests {
     let mut cpu = setup_abs_reg(index, y, value);
     cpu.accumulator.set(acc);
     cpu.y_register.set(y);
-    cpu.and_absolute_y();
+    cpu.absolute_y("AND", &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), acc & value);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -875,7 +745,7 @@ mod tests {
   fn and_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, value: u8) {
     let mut cpu = setup_indexed_x(acc, value, v1, v2, operand, x);
     cpu.x_register.set(x);
-    cpu.and_indexed_x();
+    cpu.indexed_x("AND", &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), value & acc);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -884,7 +754,7 @@ mod tests {
   fn and_indexed_y(acc: u8, operand: u8, y: u8, v1: u8, v2: u8, value: u8) {
     let mut cpu = setup_indexed_y(acc, value, v1, v2, operand, y);
     cpu.y_register.set(y);
-    cpu.and_indexed_y();
+    cpu.indexed_y("AND", &mut CPU::and);
     assert_eq!(cpu.accumulator.get(), value & acc);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -993,10 +863,8 @@ mod tests {
 
   #[test_case(random(), r_lsb(), random())]
   fn bit_zero_page(val: u8, index: u8, acc: u8) {
-    let mut cpu = CPU::new();
-    cpu.memory.set_zero_page(index, val);
-    cpu.accumulator.set(acc);
-    cpu.bit_zero_page(index);
+    let mut cpu = setup_zp(acc, index, val);
+    cpu.zero_page("BIT", &mut CPU::bit);
     assert_eq!(
       cpu.status_register.is_zero_bit_set(),
       is_zero_bit_set(val & acc)
@@ -1014,10 +882,9 @@ mod tests {
 
   #[test_case(r_u16(), random(), random())]
   fn bit_absolute(index: u16, val: u8, acc: u8) {
-    let mut cpu = CPU::new();
-    cpu.memory.set(index, val);
+    let mut cpu = setup_abs(index, val);
     cpu.accumulator.set(acc);
-    cpu.bit_absolute(index);
+    cpu.absolute("BIT", &mut CPU::bit);
     assert_eq!(
       cpu.status_register.is_zero_bit_set(),
       is_zero_bit_set(val & acc)
@@ -1081,7 +948,7 @@ mod tests {
   #[test_case(random(), r_lsb())]
   fn lda_zero_page(val: u8, index: u8) {
     let mut cpu = setup_zp(0, index, val);
-    cpu.lda_zero_page();
+    cpu.zero_page("LDA", &mut CPU::lda);
     assert_eq!(cpu.accumulator.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1090,7 +957,7 @@ mod tests {
   fn lda_zero_page_x(val: u8, x: u8, index: u8) {
     let mut cpu = setup_zp_reg(0, index, x, val);
     cpu.x_register.set(x);
-    cpu.lda_zero_page_x();
+    cpu.zp_reg("LDA", x, &mut CPU::lda);
     assert_eq!(cpu.accumulator.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1098,7 +965,7 @@ mod tests {
   #[test_case(r_u16(), random())]
   fn lda_absolute(index: u16, val: u8) {
     let mut cpu = setup_abs(index, val);
-    cpu.lda_absolute();
+    cpu.absolute("LDA", &mut CPU::lda);
     assert_eq!(cpu.accumulator.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -1107,7 +974,7 @@ mod tests {
   fn lda_absolute_x(index: u16, val: u8, x: u8) {
     let mut cpu = setup_abs_reg(index, x, val);
     cpu.x_register.set(x);
-    cpu.lda_absolute_x();
+    cpu.absolute_x("LDA", &mut CPU::lda);
     assert_eq!(cpu.accumulator.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -1116,7 +983,7 @@ mod tests {
   fn lda_absolute_y(index: u16, y: u8, val: u8) {
     let mut cpu = setup_abs_reg(index, y, val);
     cpu.y_register.set(y);
-    cpu.lda_absolute_y();
+    cpu.absolute_y("LDA", &mut CPU::lda);
     assert_eq!(cpu.accumulator.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -1133,7 +1000,7 @@ mod tests {
   #[test_case(r_lsb(), random())]
   fn ldx_zero_page(index: u8, val: u8) {
     let mut cpu = setup_zp(0, index, val);
-    cpu.ldx_zero_page();
+    cpu.zero_page("LDX", &mut CPU::ldx);
     assert_eq!(cpu.x_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1142,7 +1009,7 @@ mod tests {
   fn ldx_zero_page_y(index: u8, val: u8, y: u8) {
     let mut cpu = setup_zp_reg(0, index, y, val);
     cpu.y_register.set(y);
-    cpu.ldx_zero_page_y();
+    cpu.zp_reg("LDX", y, &mut CPU::ldx);
     assert_eq!(cpu.x_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1150,7 +1017,7 @@ mod tests {
   #[test_case(r_u16(), random())]
   fn ldx_absolute(index: u16, val: u8) {
     let mut cpu = setup_abs(index, val);
-    cpu.ldx_absolute();
+    cpu.absolute("LDX", &mut CPU::ldx);
     assert_eq!(cpu.x_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -1159,7 +1026,7 @@ mod tests {
   fn ldx_absolute_y(index: u16, val: u8, y: u8) {
     let mut cpu = setup_abs_reg(index, y, val);
     cpu.y_register.set(y);
-    cpu.ldx_absolute_y();
+    cpu.absolute_y("LDX", &mut CPU::ldx);
     assert_eq!(cpu.x_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -1176,7 +1043,7 @@ mod tests {
   #[test_case(r_lsb(), random())]
   fn ldy_zero_page(index: u8, val: u8) {
     let mut cpu = setup_zp(0, index, val);
-    cpu.ldy_zero_page();
+    cpu.zero_page("LDY", &mut CPU::ldy);
     assert_eq!(cpu.y_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1185,7 +1052,7 @@ mod tests {
   fn ldy_zero_page_x(index: u8, val: u8, x: u8) {
     let mut cpu = setup_zp_reg(0, index, x, val);
     cpu.x_register.set(x);
-    cpu.ldy_zero_page_x();
+    cpu.zp_reg("LDX", x, &mut CPU::ldy);
     assert_eq!(cpu.y_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1193,7 +1060,7 @@ mod tests {
   #[test_case(r_u16(), random())]
   fn ldy_absolute(index: u16, val: u8) {
     let mut cpu = setup_abs(index, val);
-    cpu.ldy_absolute();
+    cpu.absolute("LDY", &mut CPU::ldy);
     assert_eq!(cpu.y_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
@@ -1202,7 +1069,7 @@ mod tests {
   fn ldy_absolute_x(index: u16, val: u8, x: u8) {
     let mut cpu = setup_abs_reg(index, x, val);
     cpu.x_register.set(x);
-    cpu.ldy_absolute_x();
+    cpu.absolute_x("LDY", &mut CPU::ldy);
     assert_eq!(cpu.y_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 3);
   }
