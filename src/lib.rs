@@ -538,7 +538,8 @@ impl CPU {
     self.memory.set(index, self.accumulator.get());
   }
 
-  pub fn sta_indexed_y(&mut self, operand: u8) {
+  pub fn sta_indexed_y(&mut self) {
+    let operand = self.program_counter.get_single_operand(&self.memory);
     let index = self
       .memory
       .get_post_adjusted_index(operand, self.y_register.get());
@@ -1252,23 +1253,22 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(random(), random(), random(), random(), random(), r_u16())]
-  fn sta_indexed_x(val: u8, x: u8, op: u8, v1: u8, v2: u8, index: u16) {
+  #[test_case(random(), random(), random(), random(), random())]
+  fn sta_indexed_x(val: u8, x: u8, op: u8, v1: u8, v2: u8) {
     let mut cpu = setup_indexed_x(val, 0, v1, v2, op, x);
     cpu.x_register.set(x);
     cpu.sta_indexed_x();
+    let index = u16::from_le_bytes([v1, v2]);
     assert_eq!(cpu.memory.get_u16(index), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[ignore]
-  #[test_case(random(), random(), random(), random(), random(), r_u16())]
-  fn sta_indexed_y(val: u8, y: u8, op: u8, v1: u8, v2: u8, index: u16) {
-    let mut cpu = setup(val);
+  #[test_case(random(), random(), random(), random(), random())]
+  fn sta_indexed_y(val: u8, y: u8, op: u8, v1: u8, v2: u8) {
+    let mut cpu = setup_indexed_y(val, 0, v1, v2, op, y);
     cpu.y_register.set(y);
-    cpu.memory.set_zero_page(op, v1);
-    cpu.memory.set_zero_page(op.wrapping_add(1), v2);
-    cpu.sta_indexed_y(op);
+    let index = u16::from_le_bytes([v1, v2]);
+    cpu.sta_indexed_y();
     assert_eq!(cpu.memory.get_u16(index.wrapping_add(y as u16)), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
