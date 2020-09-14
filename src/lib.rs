@@ -10,6 +10,9 @@ use std::time::Duration;
 const STARTING_MEMORY_BLOCK: u16 = 0x8000;
 const TIME_PER_CYCLE: u64 = 1790;
 
+// TODO: Memory space is 256 pages of 256 bytes. If a page index (hi byte) is incremented
+// Cycles should be incremented as well per "page boundary crossing"
+
 /// An emulated CPU for the 6502 processor.
 pub struct CPU {
   program_counter: ProgramCounter,
@@ -269,6 +272,57 @@ impl CPU {
     }
   }
 
+  fn branch(&mut self, condition: bool, op: u8) {
+    if condition {
+      if op > 0x7F {
+        println!("decreasing");
+        self.program_counter.decrease(!op + 1);
+      } else {
+        self.program_counter.increase(op);
+      }
+    }
+  }
+
+  pub fn bpl(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(!self.status_register.is_negative_bit_set(), op);
+  }
+
+  pub fn bmi(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(self.status_register.is_negative_bit_set(), op);
+  }
+
+  pub fn bvc(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(!self.status_register.is_overflow_bit_set(), op);
+  }
+
+  pub fn bvs(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(self.status_register.is_overflow_bit_set(), op);
+  }
+
+  pub fn bcc(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(!self.status_register.is_carry_bit_set(), op);
+  }
+
+  pub fn bcs(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(self.status_register.is_carry_bit_set(), op);
+  }
+
+  pub fn bne(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(self.status_register.is_zero_bit_set(), op);
+  }
+
+  pub fn beq(&mut self) {
+    let op = self.program_counter.get_single_operand(&self.memory);
+    self.branch(!self.status_register.is_zero_bit_set(), op);
+  }
+
   pub fn clc(&mut self) {
     self.flag_operation("CLC", &mut StatusRegister::clear_carry_bit);
   }
@@ -466,7 +520,7 @@ mod tests {
   fn reset_cpu() {
     let mut cpu = CPU::new();
     cpu.stack_pointer.decrement();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     cpu.accumulator.set(23);
     cpu.x_register.set(23);
     cpu.y_register.set(23);
@@ -489,7 +543,7 @@ mod tests {
     let mut cpu = setup(acc);
     cpu.memory.set_zero_page(index, value);
     cpu.memory.set_zero_page(1, index);
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     cpu
   }
 
@@ -497,7 +551,7 @@ mod tests {
     let mut cpu = setup(acc);
     cpu.memory.set_zero_page(index.wrapping_add(reg), value);
     cpu.memory.set_zero_page(1, index);
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     cpu
   }
 
@@ -505,7 +559,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.memory.set_zero_page(1, ops[0]);
     cpu.memory.set_zero_page(2, ops[1]);
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     cpu
   }
 
@@ -529,7 +583,7 @@ mod tests {
     cpu.memory.set_zero_page(start, v1);
     cpu.memory.set_zero_page(start.wrapping_add(1), v2);
     cpu.memory.set_zero_page(1, op);
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     cpu
   }
 
@@ -540,7 +594,7 @@ mod tests {
     cpu.memory.set_zero_page(op, v1);
     cpu.memory.set_zero_page(op.wrapping_add(1), v2);
     cpu.memory.set(1, op);
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     cpu
   }
 
@@ -548,6 +602,13 @@ mod tests {
     if carry > 0 {
       cpu.status_register.set_carry_bit();
     }
+  }
+
+  fn setup_branch(val: u8, pc_start: u8) -> CPU {
+    let mut cpu = CPU::new();
+    cpu.program_counter.increase(pc_start);
+    cpu.memory.set_zero_page(pc_start, val);
+    cpu
   }
 
   #[test_case(no_wrap(), no_wrap(), 0; "adc without wrap without carry set")]
@@ -562,7 +623,7 @@ mod tests {
       cpu.accumulator.get(),
       acc.wrapping_add(operand).wrapping_add(carry)
     );
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.program_counter.get(), 1);
   }
 
@@ -681,7 +742,7 @@ mod tests {
     let mut cpu = setup(acc);
     cpu.and(operand);
     // not doing any PC logic just calling the function directly
-    cpu.program_counter.advance(2);
+    cpu.program_counter.increase(2);
     assert_eq!(cpu.accumulator.get(), acc & operand);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -763,7 +824,7 @@ mod tests {
   fn asl_accumulator(acc: u8) {
     let mut cpu = setup(acc);
     cpu.asl_accumulator();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.accumulator.get(), acc.wrapping_shl(1));
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -891,12 +952,163 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
+  fn get_branch_result(val: u8, pc_start: u8) -> u8 {
+    match val > 0x7F {
+      true => pc_start - (!val + 1),
+      false => pc_start + val,
+    }
+  }
+
+  #[test_case(wrap(), wrap(); "Branch PC goes backwards")]
+  #[test_case(no_wrap(), no_wrap(); "Branch PC goes forwards")]
+  fn branch(val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    cpu.branch(true, val);
+    let result = get_branch_result(val, pc_start);
+    assert_eq!(cpu.program_counter.get(), result as usize);
+  }
+
+  #[test_case(random(), random(); "No branch PC doesnt do anything")]
+  fn no_branch(val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    cpu.branch(false, val);
+    assert_eq!(cpu.program_counter.get(), pc_start as usize);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bpl(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_negative_bit();
+      result = pc_start;
+    } else {
+      result = get_branch_result(val, pc_start);
+    }
+    cpu.bpl();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bmi(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_negative_bit();
+      result = get_branch_result(val, pc_start);
+    } else {
+      result = pc_start;
+    }
+    cpu.bmi();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bvc(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_overflow_bit();
+      result = pc_start;
+    } else {
+      result = get_branch_result(val, pc_start);
+    }
+    cpu.bvc();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bvs(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_overflow_bit();
+      result = get_branch_result(val, pc_start);
+    } else {
+      result = pc_start;
+    }
+    cpu.bvs();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bcc(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_carry_bit();
+      result = pc_start;
+    } else {
+      result = get_branch_result(val, pc_start);
+    }
+    cpu.bcc();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bcs(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_carry_bit();
+      result = get_branch_result(val, pc_start);
+    } else {
+      result = pc_start;
+    }
+    cpu.bcs();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn bne(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_zero_bit();
+      result = get_branch_result(val, pc_start);
+    } else {
+      result = pc_start;
+    }
+    cpu.bne();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
+  #[test_case(true, no_wrap(), no_wrap())]
+  #[test_case(false, no_wrap(), no_wrap())]
+  fn beq(set_bit: bool, val: u8, pc_start: u8) {
+    let mut cpu = setup_branch(val, pc_start);
+    let result;
+    if set_bit {
+      cpu.status_register.set_zero_bit();
+      result = pc_start;
+    } else {
+      result = get_branch_result(val, pc_start);
+    }
+    cpu.beq();
+    // increment by 1 for the opcode
+    assert_eq!(cpu.program_counter.get(), result as usize + 1);
+  }
+
   #[test]
   fn clc() {
     let mut cpu = CPU::new();
     cpu.status_register.set_carry_bit();
     cpu.clc();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_carry_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -906,7 +1118,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_decimal_bit();
     cpu.cld();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_decimal_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -916,7 +1128,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_interrupt_bit();
     cpu.cli();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -926,7 +1138,7 @@ mod tests {
     let mut cpu = CPU::new();
     cpu.status_register.set_overflow_bit();
     cpu.clv();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -935,7 +1147,7 @@ mod tests {
   fn lda(val: u8) {
     let mut cpu = CPU::new();
     cpu.lda(val);
-    cpu.program_counter.advance(2);
+    cpu.program_counter.increase(2);
     assert_eq!(cpu.accumulator.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -987,7 +1199,7 @@ mod tests {
   fn ldx(val: u8) {
     let mut cpu = CPU::new();
     cpu.ldx(val);
-    cpu.program_counter.advance(2);
+    cpu.program_counter.increase(2);
     assert_eq!(cpu.x_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1030,7 +1242,7 @@ mod tests {
   fn ldy(val: u8) {
     let mut cpu = CPU::new();
     cpu.ldy(val);
-    cpu.program_counter.advance(2);
+    cpu.program_counter.increase(2);
     assert_eq!(cpu.y_register.get(), val);
     assert_eq!(cpu.program_counter.get(), 2);
   }
@@ -1139,7 +1351,7 @@ mod tests {
   fn sec() {
     let mut cpu = CPU::new();
     cpu.sec();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_carry_bit_set(), true);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -1148,7 +1360,7 @@ mod tests {
   fn sed() {
     let mut cpu = CPU::new();
     cpu.sed();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_decimal_bit_set(), true);
     assert_eq!(cpu.program_counter.get(), 1);
   }
@@ -1157,7 +1369,7 @@ mod tests {
   fn sei() {
     let mut cpu = CPU::new();
     cpu.sei();
-    cpu.program_counter.advance(1);
+    cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
     assert_eq!(cpu.program_counter.get(), 1);
   }

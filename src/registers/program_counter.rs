@@ -20,24 +20,28 @@ impl ProgramCounter {
 
   /// Gets the value at the program counter then advances by 1
   pub fn get_single_operand(&mut self, memory: &Memory) -> u8 {
-    memory.get_u16(self.get_and_advance())
+    memory.get_u16(self.get_and_increase())
   }
 
-  /// Gets the next two values at the program counter and advances by 2
+  /// Gets the next two values at the program counter and increases by 2
   pub fn get_two_operands(&mut self, memory: &Memory) -> [u8; 2] {
     [
-      memory.get_u16(self.get_and_advance()),
-      memory.get_u16(self.get_and_advance()),
+      memory.get_u16(self.get_and_increase()),
+      memory.get_u16(self.get_and_increase()),
     ]
   }
 
-  pub fn advance(&mut self, amount: u16) {
-    self.value += amount;
+  pub fn increase(&mut self, amount: u8) {
+    self.value += amount as u16;
   }
 
-  fn get_and_advance(&mut self) -> u16 {
+  pub fn decrease(&mut self, amount: u8) {
+    self.value -= amount as u16;
+  }
+
+  fn get_and_increase(&mut self) -> u16 {
     let v = self.value;
-    self.advance(1);
+    self.increase(1);
     v
   }
 }
@@ -68,9 +72,9 @@ mod tests {
   }
 
   #[test]
-  fn advance() {
+  fn increase() {
     let mut pc = ProgramCounter::new();
-    pc.advance(2);
+    pc.increase(2);
     assert_eq!(pc.value, 2);
   }
 }
