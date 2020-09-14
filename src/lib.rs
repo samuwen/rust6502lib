@@ -315,12 +315,12 @@ impl CPU {
 
   pub fn bne(&mut self) {
     let op = self.program_counter.get_single_operand(&self.memory);
-    self.branch(self.status_register.is_zero_bit_set(), op);
+    self.branch(!self.status_register.is_zero_bit_set(), op);
   }
 
   pub fn beq(&mut self) {
     let op = self.program_counter.get_single_operand(&self.memory);
-    self.branch(!self.status_register.is_zero_bit_set(), op);
+    self.branch(self.status_register.is_zero_bit_set(), op);
   }
 
   pub fn clc(&mut self) {
@@ -1078,9 +1078,9 @@ mod tests {
     let result;
     if set_bit {
       cpu.status_register.set_zero_bit();
-      result = get_branch_result(val, pc_start);
-    } else {
       result = pc_start;
+    } else {
+      result = get_branch_result(val, pc_start);
     }
     cpu.bne();
     // increment by 1 for the opcode
@@ -1094,9 +1094,9 @@ mod tests {
     let result;
     if set_bit {
       cpu.status_register.set_zero_bit();
-      result = pc_start;
-    } else {
       result = get_branch_result(val, pc_start);
+    } else {
+      result = pc_start;
     }
     cpu.beq();
     // increment by 1 for the opcode
