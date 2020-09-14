@@ -22,7 +22,6 @@ pub struct CPU {
   y_register: GeneralRegister,
   status_register: StatusRegister,
   memory: Memory,
-  cycle_counter: u8,
 }
 
 impl CPU {
@@ -37,7 +36,6 @@ impl CPU {
       y_register: GeneralRegister::new(),
       status_register: StatusRegister::new(),
       memory: Memory::new(),
-      cycle_counter: 0,
     }
   }
 
@@ -50,7 +48,6 @@ impl CPU {
     self.y_register.reset();
     self.status_register.reset();
     self.memory.reset();
-    self.cycle_counter = 0;
     trace!("CPU Reset")
   }
 
@@ -62,12 +59,18 @@ impl CPU {
     }
   }
 
+  /// Allows us to suspend the thread for a cycle
+  fn wait_for_cycle() {
+    std::thread::sleep(Duration::from_micros(TIME_PER_CYCLE));
+  }
+
   /// Runs a program while there are opcodes to handle. This will change when we actually have
   /// a real data set to operate against.
   pub fn run(&mut self, program: Vec<u8>) {
     self.load_program_into_memory(&program);
     loop {
       let opcode = self.program_counter.get_single_operand(&self.memory);
+      CPU::wait_for_cycle();
       match opcode {
         0x24 => self.zero_page("BIT", &mut CPU::bit),
         0x29 => self.immediate("AND", &mut CPU::and),
@@ -82,9 +85,6 @@ impl CPU {
         0x7D => self.absolute_y("ADC", &mut CPU::adc),
         _ => (),
       }
-      std::thread::sleep(Duration::from_micros(
-        self.cycle_counter as u64 * TIME_PER_CYCLE,
-      ));
     }
   }
 
@@ -162,6 +162,28 @@ impl CPU {
   fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
     trace!("{} called", name);
     cb(&mut self.status_register);
+  }
+
+  fn branch(&mut self, condition: bool, op: u8) {
+    if condition {
+      if op > 0x7F {
+        println!("decreasing");
+        self.program_counter.decrease(!op + 1);
+      } else {
+        self.program_counter.increase(op);
+      }
+    }
+  }
+
+  fn generic_compare(&mut self, test_value: u8, reg_value: u8) {
+    let (result, carry) = reg_value.overflowing_sub(test_value);
+    if result == 0 {
+      self.status_register.set_zero_bit();
+    } else if !carry {
+      self.status_register.set_carry_bit();
+    } else if (result & 0x80) > 0 {
+      self.status_register.set_negative_bit();
+    }
   }
 
   /*
@@ -272,17 +294,6 @@ impl CPU {
     }
   }
 
-  fn branch(&mut self, condition: bool, op: u8) {
-    if condition {
-      if op > 0x7F {
-        println!("decreasing");
-        self.program_counter.decrease(!op + 1);
-      } else {
-        self.program_counter.increase(op);
-      }
-    }
-  }
-
   pub fn bpl(&mut self) {
     let op = self.program_counter.get_single_operand(&self.memory);
     self.branch(!self.status_register.is_negative_bit_set(), op);
@@ -321,6 +332,18 @@ impl CPU {
   pub fn beq(&mut self) {
     let op = self.program_counter.get_single_operand(&self.memory);
     self.branch(self.status_register.is_zero_bit_set(), op);
+  }
+
+  pub fn cmp(&mut self, test_value: u8) {
+    self.generic_compare(test_value, self.accumulator.get());
+  }
+
+  pub fn cpx(&mut self, test_value: u8) {
+    self.generic_compare(test_value, self.x_register.get());
+  }
+
+  pub fn cpy(&mut self, test_value: u8) {
+    self.generic_compare(test_value, self.y_register.get());
   }
 
   pub fn clc(&mut self) {
@@ -506,6 +529,33 @@ mod tests {
     rand_range(0x5, 0xFFFE)
   }
 
+  fn get_addition_pair() -> (u8, u8) {
+    let v1 = r_lsb();
+    let mut v2 = random();
+    while v1.wrapping_add(v2) < 0x05 {
+      v2 = random();
+    }
+    (v1, v2)
+  }
+
+  fn get_addition_pair_fn<F: Fn() -> u8>(fn1: F, fn2: F) -> (u8, u8) {
+    let v1 = fn1();
+    let mut v2 = fn2();
+    while v1.wrapping_add(v2) < 0x05 {
+      v2 = fn2();
+    }
+    (v1, v2)
+  }
+
+  fn get_addition_pair_u16() -> (u16, u8) {
+    let v1 = r_u16();
+    let mut v2 = random();
+    while v1.wrapping_add(v2 as u16) < 0x05 {
+      v2 = random();
+    }
+    (v1, v2)
+  }
+
   #[test]
   fn create_new_cpu() {
     let cpu = CPU::new();
@@ -642,11 +692,12 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test_case(no_wrap(), r_lsb(), random(), no_wrap(), 0; "indexed zero page without wrap without carry")]
-  #[test_case(wrap(), r_lsb(), random(), wrap(), 0; "indexed zero page with wrap without carry")]
-  #[test_case(no_wrap(), r_lsb(), random(), no_wrap(), 1; "indexed zero page without wrap with carry")]
-  #[test_case(wrap(), r_lsb(), random(), wrap(), 1; "indexed zero page with wrap with carry")]
-  fn adc_zero_page_x(acc: u8, index: u8, x: u8, value: u8, carry: u8) {
+  #[test_case(no_wrap(), get_addition_pair(), no_wrap(), 0; "indexed zero page without wrap without carry")]
+  #[test_case(wrap(), get_addition_pair(), wrap(), 0; "indexed zero page with wrap without carry")]
+  #[test_case(no_wrap(), get_addition_pair(), no_wrap(), 1; "indexed zero page without wrap with carry")]
+  #[test_case(wrap(), get_addition_pair(), wrap(), 1; "indexed zero page with wrap with carry")]
+  fn adc_zero_page_x(acc: u8, pair: (u8, u8), value: u8, carry: u8) {
+    let (index, x) = pair;
     let mut cpu = setup_zp_reg(acc, index, x, value);
     setup_carry(&mut cpu, carry);
     cpu.x_register.set(x);
@@ -674,11 +725,12 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(no_wrap(), r_u16(), random(), no_wrap(), 0; "absolute x without wrap without carry")]
-  #[test_case(wrap(), r_u16(), random(), wrap(), 0; "absolute x with wrap without carry")]
-  #[test_case(no_wrap(), r_u16(), random(), no_wrap(), 1; "absolute x without wrap with carry")]
-  #[test_case(wrap(), r_u16(), random(), wrap(), 1; "absolute x with wrap with carry")]
-  fn adc_absolute_x(acc: u8, index: u16, x: u8, value: u8, carry: u8) {
+  #[test_case(no_wrap(), get_addition_pair_u16(), no_wrap(), 0; "absolute x without wrap without carry")]
+  #[test_case(wrap(), get_addition_pair_u16(), wrap(), 0; "absolute x with wrap without carry")]
+  #[test_case(no_wrap(), get_addition_pair_u16(), no_wrap(), 1; "absolute x without wrap with carry")]
+  #[test_case(wrap(), get_addition_pair_u16(), wrap(), 1; "absolute x with wrap with carry")]
+  fn adc_absolute_x(acc: u8, pair: (u16, u8), value: u8, carry: u8) {
+    let (index, x) = pair;
     let mut cpu = setup_abs_reg(index, x, value);
     cpu.accumulator.set(acc);
     setup_carry(&mut cpu, carry);
@@ -688,11 +740,12 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(no_wrap(), r_u16(), random(), no_wrap(), 0; "absolute y without wrap without carry")]
-  #[test_case(wrap(), r_u16(), random(), wrap(), 0; "absolute y with wrap without carry")]
-  #[test_case(no_wrap(), r_u16(), random(), no_wrap(), 1; "absolute y without wrap with carry")]
-  #[test_case(wrap(), r_u16(), random(), wrap(), 1; "absolute y with wrap with carry")]
-  fn adc_absolute_y(acc: u8, index: u16, y: u8, value: u8, carry: u8) {
+  #[test_case(no_wrap(), get_addition_pair_u16(), no_wrap(), 0; "absolute y without wrap without carry")]
+  #[test_case(wrap(), get_addition_pair_u16(), wrap(), 0; "absolute y with wrap without carry")]
+  #[test_case(no_wrap(), get_addition_pair_u16(), no_wrap(), 1; "absolute y without wrap with carry")]
+  #[test_case(wrap(), get_addition_pair_u16(), wrap(), 1; "absolute y with wrap with carry")]
+  fn adc_absolute_y(acc: u8, pair: (u16, u8), value: u8, carry: u8) {
+    let (index, y) = pair;
     let mut cpu = setup_abs_reg(index, y, value);
     cpu.accumulator.set(acc);
     setup_carry(&mut cpu, carry);
@@ -702,11 +755,12 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(no_wrap(), r_lsb(), random(), random(), random(), no_wrap(), 0; "indexed x without wrap without carry")]
-  #[test_case(wrap(), r_lsb(), random(), random(), random(), wrap(), 0; "indexed x with wrap without carry")]
-  #[test_case(no_wrap(), r_lsb(), random(), random(), random(), no_wrap(), 1; "indexed x without wrap with carry")]
-  #[test_case(wrap(), r_lsb(), random(), random(), random(), wrap(), 1; "indexed x with wrap with carry")]
-  fn adc_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, value: u8, carry: u8) {
+  #[test_case(no_wrap(), get_addition_pair(), random(), random(), no_wrap(), 0; "indexed x without wrap without carry")]
+  #[test_case(wrap(), get_addition_pair(), random(), random(), wrap(), 0; "indexed x with wrap without carry")]
+  #[test_case(no_wrap(), get_addition_pair(), random(), random(), no_wrap(), 1; "indexed x without wrap with carry")]
+  #[test_case(wrap(), get_addition_pair(), random(), random(), wrap(), 1; "indexed x with wrap with carry")]
+  fn adc_indexed_x(acc: u8, pair: (u8, u8), v1: u8, v2: u8, value: u8, carry: u8) {
+    let (operand, x) = pair;
     let mut cpu = setup_indexed_x(acc, value, v1, v2, operand, x);
     if operand.wrapping_add(x) == 0 {
       cpu = setup_indexed_x(acc, value, v1, v2, operand, random());
@@ -721,14 +775,15 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test_case(no_wrap(), r_lsb(), random(), 0x30, 0x40, no_wrap(), 0; "indexed y without wrap without carry")]
-  #[test_case(wrap(), r_lsb(), random(), 0x30, 0x40, wrap(), 0; "indexed y with wrap without carry")]
-  #[test_case(no_wrap(), r_lsb(), random(), 0x30, 0x40, no_wrap(), 1; "indexed y without wrap with carry")]
-  #[test_case(wrap(), r_lsb(), random(), 0x30, 0x40, wrap(), 1; "indexed y with wrap with carry")]
-  fn adc_indexed_y(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, value: u8, carry: u8) {
-    let mut cpu = setup_indexed_y(acc, value, v1, v2, operand, x);
+  #[test_case(no_wrap(), get_addition_pair(), random(), random(), no_wrap(), 0; "indexed y without wrap without carry")]
+  #[test_case(wrap(), get_addition_pair(), random(), random(), wrap(), 0; "indexed y with wrap without carry")]
+  #[test_case(no_wrap(), get_addition_pair(), random(), random(), no_wrap(), 1; "indexed y without wrap with carry")]
+  #[test_case(wrap(), get_addition_pair(), random(), random(), wrap(), 1; "indexed y with wrap with carry")]
+  fn adc_indexed_y(acc: u8, pair: (u8, u8), v1: u8, v2: u8, value: u8, carry: u8) {
+    let (operand, y) = pair;
+    let mut cpu = setup_indexed_y(acc, value, v1, v2, operand, y);
     setup_carry(&mut cpu, carry);
-    cpu.y_register.set(x);
+    cpu.y_register.set(y);
     cpu.indexed_y("ADC", &mut CPU::adc);
     assert_eq!(
       cpu.accumulator.get(),
@@ -755,8 +810,9 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test_case(random(), r_lsb(), random(), random())]
-  fn and_zero_page_x(acc: u8, index: u8, value: u8, x: u8) {
+  #[test_case(random(), get_addition_pair(), random())]
+  fn and_zero_page_x(acc: u8, pair: (u8, u8), value: u8) {
+    let (index, x) = pair;
     let mut cpu = setup_zp_reg(acc, index, x, value);
     cpu.x_register.set(x);
     cpu.zp_reg("AND", x, &mut CPU::and);
@@ -764,8 +820,9 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test_case(random(), r_u16(), random())]
-  fn and_absolute(acc: u8, index: u16, value: u8) {
+  #[test_case(random(), get_addition_pair_u16())]
+  fn and_absolute(acc: u8, pair: (u16, u8)) {
+    let (index, value) = pair;
     let mut cpu = setup_abs(index, value);
     cpu.accumulator.set(acc);
     cpu.absolute("AND", &mut CPU::and);
@@ -773,8 +830,9 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(random(), r_u16(), random(), random())]
-  fn and_absolute_x(acc: u8, index: u16, value: u8, x: u8) {
+  #[test_case(random(), get_addition_pair_u16(), random())]
+  fn and_absolute_x(acc: u8, pair: (u16, u8), value: u8) {
+    let (index, x) = pair;
     let mut cpu = setup_abs_reg(index, x, value);
     cpu.accumulator.set(acc);
     cpu.x_register.set(x);
@@ -783,8 +841,9 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(random(), r_u16(), random(), random())]
-  fn and_absolute_y(acc: u8, index: u16, value: u8, y: u8) {
+  #[test_case(random(), get_addition_pair_u16(), random())]
+  fn and_absolute_y(acc: u8, pair: (u16, u8), value: u8) {
+    let (index, y) = pair;
     let mut cpu = setup_abs_reg(index, y, value);
     cpu.accumulator.set(acc);
     cpu.y_register.set(y);
@@ -793,8 +852,9 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(random(), r_lsb(), random(), random(), random(), random())]
-  fn and_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, value: u8) {
+  #[test_case(random(), get_addition_pair(), random(), random(), random())]
+  fn and_indexed_x(acc: u8, pair: (u8, u8), v1: u8, v2: u8, value: u8) {
+    let (operand, x) = pair;
     let mut cpu = setup_indexed_x(acc, value, v1, v2, operand, x);
     cpu.x_register.set(x);
     cpu.indexed_x("AND", &mut CPU::and);
@@ -802,8 +862,9 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test_case(random(), r_lsb(), random(), random(), random(), random())]
-  fn and_indexed_y(acc: u8, operand: u8, y: u8, v1: u8, v2: u8, value: u8) {
+  #[test_case(random(), get_addition_pair(), random(), random(), random())]
+  fn and_indexed_y(acc: u8, pair: (u8, u8), v1: u8, v2: u8, value: u8) {
+    let (operand, y) = pair;
     let mut cpu = setup_indexed_y(acc, value, v1, v2, operand, y);
     cpu.y_register.set(y);
     cpu.indexed_y("AND", &mut CPU::and);
@@ -838,11 +899,12 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 2);
   }
 
-  #[test_case(no_wrap(), no_wrap(), no_wrap(); "without shift wrap without index wrap")]
-  #[test_case(no_wrap(), wrap(), no_wrap(); "with shift wrap without index wrap")]
-  #[test_case(wrap(), no_wrap(), wrap(); "without shift wrap with index wrap")]
-  #[test_case(wrap(), wrap(), wrap(); "with shift wrap with index wrap")]
-  fn asl_zero_page_x(index: u8, value: u8, x: u8) {
+  #[test_case(get_addition_pair_fn(no_wrap, no_wrap), no_wrap(); "without shift wrap without index wrap")]
+  #[test_case(get_addition_pair_fn(no_wrap, no_wrap), wrap(); "with shift wrap without index wrap")]
+  #[test_case(get_addition_pair_fn(wrap, wrap), no_wrap(); "without shift wrap with index wrap")]
+  #[test_case(get_addition_pair_fn(wrap, wrap), wrap(); "with shift wrap with index wrap")]
+  fn asl_zero_page_x(pair: (u8, u8), value: u8) {
+    let (index, x) = pair;
     let mod_index = index.wrapping_add(x);
     let mut cpu = setup_zp_reg(0, index, x, value);
     cpu.x_register.set(x);
@@ -860,9 +922,10 @@ mod tests {
     assert_eq!(cpu.program_counter.get(), 3);
   }
 
-  #[test_case(random(), no_wrap(), no_wrap(); "without wrap")]
-  #[test_case(random(), no_wrap(), wrap(); "with wrap")]
-  fn asl_absolute_x(index: u16, value: u8, x: u8) {
+  #[test_case(get_addition_pair_u16(), no_wrap(); "without wrap")]
+  #[test_case(get_addition_pair_u16(), no_wrap(); "with wrap")]
+  fn asl_absolute_x(pair: (u16, u8), value: u8) {
+    let (index, x) = pair;
     let mod_index = index.wrapping_add(x as u16);
     let mut cpu = setup_abs_reg(index, x, value);
     cpu.x_register.set(x);
@@ -1141,6 +1204,15 @@ mod tests {
     cpu.program_counter.increase(1);
     assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
     assert_eq!(cpu.program_counter.get(), 1);
+  }
+
+  #[test_case(wrap(), no_wrap(); "Compare acc where acc is greater")]
+  fn cmp_immediate(acc: u8, val: u8) {
+    let mut cpu = setup(acc);
+    cpu.cmp(val);
+    assert_eq!(cpu.status_register.is_zero_bit_set(), false);
+    assert_eq!(cpu.status_register.is_carry_bit_set(), true);
+    assert_eq!(cpu.status_register.is_negative_bit_set(), false);
   }
 
   #[test_case(random())]
