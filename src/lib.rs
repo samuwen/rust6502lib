@@ -61,33 +61,15 @@ impl CPU {
     loop {
       let opcode = self.program_counter.get_single_operand(&self.memory);
       match opcode {
-        0x29 => {
-          self.immediate("AND", &mut CPU::and);
-        }
-        0x61 => {
-          self.indexed_x("ADC", &mut CPU::adc);
-        }
-        0x65 => {
-          self.zero_page("ADC", &mut CPU::adc);
-        }
-        0x69 => {
-          self.immediate("ADC", &mut CPU::adc);
-        }
-        0x6D => {
-          self.absolute("ADC", &mut CPU::adc);
-        }
-        0x71 => {
-          self.indexed_y("ADC", &mut CPU::adc);
-        }
-        0x75 => {
-          self.zp_reg("ADC", self.x_register.get(), &mut CPU::adc);
-        }
-        0x79 => {
-          self.absolute_x("ADC", &mut CPU::adc);
-        }
-        0x7D => {
-          self.absolute_y("ADC", &mut CPU::adc);
-        }
+        0x29 => self.immediate("AND", &mut CPU::and),
+        0x61 => self.indexed_x("ADC", &mut CPU::adc),
+        0x65 => self.zero_page("ADC", &mut CPU::adc),
+        0x69 => self.immediate("ADC", &mut CPU::adc),
+        0x6D => self.absolute("ADC", &mut CPU::adc),
+        0x71 => self.indexed_y("ADC", &mut CPU::adc),
+        0x75 => self.zp_reg("ADC", self.x_register.get(), &mut CPU::adc),
+        0x79 => self.absolute_x("ADC", &mut CPU::adc),
+        0x7D => self.absolute_y("ADC", &mut CPU::adc),
         _ => (),
       }
     }
