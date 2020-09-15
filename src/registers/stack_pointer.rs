@@ -4,11 +4,11 @@ pub struct StackPointer {
 
 impl StackPointer {
   pub fn new() -> StackPointer {
-    StackPointer { value: 0 }
+    StackPointer { value: 0xFF }
   }
 
   pub fn reset(&mut self) {
-    self.value = 0;
+    self.value = 0xFF;
   }
 
   pub fn get(&self) -> u8 {
@@ -17,7 +17,7 @@ impl StackPointer {
 
   #[allow(dead_code)]
   pub fn decrement(&mut self) {
-    self.value = self.value.wrapping_sub(2);
+    self.value = self.value.wrapping_sub(1);
   }
 }
 
@@ -28,7 +28,7 @@ mod tests {
   #[test]
   fn new() {
     let sp = StackPointer::new();
-    assert_eq!(sp.value, 0);
+    assert_eq!(sp.value, 0xFF);
   }
 
   #[test]
@@ -36,7 +36,7 @@ mod tests {
     let mut sp = StackPointer::new();
     sp.value = 25;
     sp.reset();
-    assert_eq!(sp.value, 0);
+    assert_eq!(sp.value, 0xFF);
   }
 
   #[test]
@@ -50,6 +50,6 @@ mod tests {
   fn decrement() {
     let mut sp = StackPointer::new();
     sp.decrement();
-    assert_eq!(sp.value, 254);
+    assert_eq!(sp.value, 0xFE);
   }
 }

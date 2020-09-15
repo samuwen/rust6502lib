@@ -1,3 +1,6 @@
+use crate::StackPointer;
+use log::warn;
+
 pub struct Memory {
   mem: [u8; 0xFFFF],
 }
@@ -25,11 +28,24 @@ impl Memory {
   }
 
   pub fn get_u16(&self, index: u16) -> u8 {
+    if index <= 0x1FF && index >= 0x100 {
+      warn!("Accessing memory from the stack improperly!");
+    }
     self.mem[index as usize]
   }
 
   pub fn get_u16_and_register(&self, index: u16, register: u8) -> u8 {
-    self.mem[(index + register as u16) as usize]
+    self.mem[(index.wrapping_add(register as u16)) as usize]
+  }
+
+  /// Adds a value to the stack. Takes in a value to be entered and the stack pointer.
+  pub fn push_to_stack(&mut self, sp: StackPointer, value: u8) {
+    self.mem[(0x100 | sp.get() as u16) as usize] = value;
+  }
+
+  /// Takes a value from the stack. Returns the value at the current stack pointer.
+  pub fn pop_from_stack(&self, sp: StackPointer) -> u8 {
+    self.mem[(0x100 | sp.get() as u16) as usize]
   }
 
   /// Computes a memory address and returns the value contained within.

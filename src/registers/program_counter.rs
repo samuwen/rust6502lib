@@ -39,6 +39,10 @@ impl ProgramCounter {
     self.value -= amount as u16;
   }
 
+  pub fn jump(&mut self, index: u16) {
+    self.value = index;
+  }
+
   fn get_and_increase(&mut self) -> u16 {
     let v = self.value;
     self.increase(1);

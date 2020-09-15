@@ -1,7 +1,7 @@
 mod memory;
 mod registers;
 
-use log::trace;
+use log::{trace, warn};
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
@@ -396,6 +396,66 @@ impl CPU {
     self.dec(index as u16);
   }
 
+  /// DEDICATED TO XOR - GOD OF INVERSE
+  pub fn eor(&mut self, value: u8) {
+    let message = "EOR";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let result = self.accumulator.get() ^ value;
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  pub fn inc(&mut self, index: u16) {
+    let value = self.memory.get_u16(index);
+    let value = value.wrapping_add(1);
+    self.memory.set(index, value);
+    self.status_register.handle_n_flag(value, "INC");
+    self.status_register.handle_z_flag(value, "INC");
+  }
+
+  pub fn inc_zp(&mut self) {
+    let index = self.program_counter.get_single_operand(&self.memory);
+    self.inc(index as u16);
+  }
+
+  pub fn inc_zp_reg(&mut self) {
+    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = index.wrapping_add(self.x_register.get());
+    self.inc(index as u16);
+  }
+
+  pub fn inc_abs(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops);
+    self.inc(index as u16);
+  }
+
+  pub fn inc_abs_x(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops);
+    let index = index.wrapping_add(self.x_register.get() as u16);
+    self.inc(index as u16);
+  }
+
+  pub fn jmp_absolute(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let index = u16::from_le_bytes(ops);
+    self.program_counter.jump(index);
+  }
+
+  pub fn jmp_indirect(&mut self) {
+    let ops = self.program_counter.get_two_operands(&self.memory);
+    let (low_test, overflow) = ops[0].overflowing_add(1);
+    if overflow {
+      warn!("Indirect jump overflowing page. Results will be weird!");
+    }
+    let hi = self.memory.get_u16(u16::from_le_bytes(ops));
+    let lo = self.memory.get_u16(u16::from_le_bytes([low_test, ops[1]]));
+    let index = u16::from_le_bytes([hi, lo]);
+    self.program_counter.jump(index);
+  }
+
   /// Loads the accumulator with the value given
   ///
   /// Affects flags N Z
@@ -595,7 +655,7 @@ mod tests {
     let cpu = CPU::new();
     assert_eq!(cpu.accumulator.get(), 0);
     assert_eq!(cpu.program_counter.get(), 0);
-    assert_eq!(cpu.stack_pointer.get(), 0);
+    assert_eq!(cpu.stack_pointer.get(), 0xFF);
     assert_eq!(cpu.x_register.get(), 0);
     assert_eq!(cpu.y_register.get(), 0);
   }
@@ -612,7 +672,7 @@ mod tests {
     cpu.reset();
     assert_eq!(cpu.accumulator.get(), 0);
     assert_eq!(cpu.program_counter.get(), 0);
-    assert_eq!(cpu.stack_pointer.get(), 0);
+    assert_eq!(cpu.stack_pointer.get(), 0xFF);
     assert_eq!(cpu.x_register.get(), 0);
     assert_eq!(cpu.y_register.get(), 0);
   }
