@@ -3,18 +3,22 @@ use log::warn;
 
 pub struct Memory {
   mem: [u8; 0xFFFF],
+  sp: StackPointer,
 }
 
 impl Memory {
   pub fn new() -> Memory {
-    Memory { mem: [0; 0xFFFF] }
+    Memory {
+      mem: [0; 0xFFFF],
+      sp: StackPointer::new(),
+    }
   }
 
   pub fn reset(&mut self) {
     self.mem = [0; 0xFFFF];
+    self.sp.reset();
   }
 
-  #[allow(dead_code)]
   pub fn set(&mut self, index: u16, value: u8) {
     self.mem[index as usize] = value;
   }
@@ -39,13 +43,13 @@ impl Memory {
   }
 
   /// Adds a value to the stack. Takes in a value to be entered and the stack pointer.
-  pub fn push_to_stack(&mut self, sp: StackPointer, value: u8) {
-    self.mem[(0x100 | sp.get() as u16) as usize] = value;
+  pub fn push_to_stack(&mut self, value: u8) {
+    self.mem[(0x100 | self.sp.push()) as usize] = value;
   }
 
   /// Takes a value from the stack. Returns the value at the current stack pointer.
-  pub fn pop_from_stack(&self, sp: StackPointer) -> u8 {
-    self.mem[(0x100 | sp.get() as u16) as usize]
+  pub fn pop_from_stack(&mut self) -> u8 {
+    self.mem[(0x100 | self.sp.pop()) as usize]
   }
 
   /// Computes a memory address and returns the value contained within.
@@ -81,6 +85,10 @@ impl Memory {
       self.get_zero_page(operand.wrapping_add(1)),
     ]);
     unadjusted_index.wrapping_add(register as u16)
+  }
+
+  pub fn get_stack_pointer(&self) -> &StackPointer {
+    &self.sp
   }
 }
 
@@ -168,5 +176,20 @@ mod tests {
     memory.mem[0x86] = 0x28;
     memory.mem[0x87] = 0x40;
     assert_eq!(memory.get_post_adjusted_index(0x86, 0x10), 0x4038);
+  }
+
+  #[test]
+  fn push_to_stack() {
+    let mut memory = Memory::new();
+    memory.push_to_stack(0x10);
+    assert_eq!(memory.get_u16(0x1FF), 0x10);
+  }
+
+  #[test]
+  fn pop_from_stack() {
+    let mut memory = Memory::new();
+    memory.set(0x1FF, 0x10);
+    let result = memory.pop_from_stack();
+    assert_eq!(result, 0x10);
   }
 }

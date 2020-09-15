@@ -16,7 +16,6 @@ const TIME_PER_CYCLE: u64 = 1790;
 /// An emulated CPU for the 6502 processor.
 pub struct CPU {
   program_counter: ProgramCounter,
-  stack_pointer: StackPointer,
   accumulator: GeneralRegister,
   x_register: GeneralRegister,
   y_register: GeneralRegister,
@@ -30,7 +29,6 @@ impl CPU {
     trace!("Initializing CPU");
     CPU {
       program_counter: ProgramCounter::new(),
-      stack_pointer: StackPointer::new(),
       accumulator: GeneralRegister::new(),
       x_register: GeneralRegister::new(),
       y_register: GeneralRegister::new(),
@@ -42,7 +40,6 @@ impl CPU {
   /// Resets the CPU to its initial state. Zeroes everything out basically.
   pub fn reset(&mut self) {
     self.program_counter.reset();
-    self.stack_pointer.reset();
     self.accumulator.reset();
     self.x_register.reset();
     self.y_register.reset();
@@ -589,7 +586,7 @@ impl Display for CPU {
     write!(
       f,
       "program_counter: 0x{:X}\nstack_pointer: 0x{:X}\naccumulator: 0x{:X}\nstatus_register: {}\nx_register: 0x{:X}\ny_register: 0x{:X}\n",
-      self.program_counter.get(), self.stack_pointer.get(), self.accumulator.get(), self.status_register, self.x_register.get(), self.y_register.get()
+      self.program_counter.get(), self.memory.get_stack_pointer().get(), self.accumulator.get(), self.status_register, self.x_register.get(), self.y_register.get()
     )
   }
 }
@@ -655,7 +652,6 @@ mod tests {
     let cpu = CPU::new();
     assert_eq!(cpu.accumulator.get(), 0);
     assert_eq!(cpu.program_counter.get(), 0);
-    assert_eq!(cpu.stack_pointer.get(), 0xFF);
     assert_eq!(cpu.x_register.get(), 0);
     assert_eq!(cpu.y_register.get(), 0);
   }
@@ -663,7 +659,6 @@ mod tests {
   #[test]
   fn reset_cpu() {
     let mut cpu = CPU::new();
-    cpu.stack_pointer.decrement();
     cpu.program_counter.increase(1);
     cpu.accumulator.set(23);
     cpu.x_register.set(23);
@@ -672,7 +667,6 @@ mod tests {
     cpu.reset();
     assert_eq!(cpu.accumulator.get(), 0);
     assert_eq!(cpu.program_counter.get(), 0);
-    assert_eq!(cpu.stack_pointer.get(), 0xFF);
     assert_eq!(cpu.x_register.get(), 0);
     assert_eq!(cpu.y_register.get(), 0);
   }

@@ -15,9 +15,16 @@ impl StackPointer {
     self.value
   }
 
-  #[allow(dead_code)]
-  pub fn decrement(&mut self) {
+  pub fn push(&mut self) -> u16 {
+    let val = self.value;
     self.value = self.value.wrapping_sub(1);
+    val as u16
+  }
+
+  pub fn pop(&mut self) -> u16 {
+    let val = self.value;
+    self.value = self.value.wrapping_add(1);
+    val as u16
   }
 }
 
@@ -47,9 +54,20 @@ mod tests {
   }
 
   #[test]
-  fn decrement() {
+  fn push() {
     let mut sp = StackPointer::new();
-    sp.decrement();
-    assert_eq!(sp.value, 0xFE);
+    sp.value = 0x45;
+    let result = sp.push();
+    assert_eq!(result, 0x45);
+    assert_eq!(sp.value, 0x44);
+  }
+
+  #[test]
+  fn pop() {
+    let mut sp = StackPointer::new();
+    sp.value = 0x45;
+    let result = sp.pop();
+    assert_eq!(result, 0x45);
+    assert_eq!(sp.value, 0x46);
   }
 }
