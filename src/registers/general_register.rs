@@ -18,6 +18,14 @@ impl GeneralRegister {
   pub fn set(&mut self, v: u8) {
     self.value = v;
   }
+
+  pub fn increment(&mut self) {
+    self.value.wrapping_add(1);
+  }
+
+  pub fn decrement(&mut self) {
+    self.value.wrapping_sub(1);
+  }
 }
 
 #[cfg(test)]

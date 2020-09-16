@@ -30,10 +30,10 @@ impl ProgramCounter {
     self.value = index;
   }
 
+  /// Increments the PC and then returns the new value.
   pub fn get_and_increase(&mut self) -> u16 {
-    let v = self.value;
     self.increase(1);
-    v
+    self.value
   }
 }
 

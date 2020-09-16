@@ -196,6 +196,12 @@ impl CPU {
     }
   }
 
+  fn register_operation(&mut self, value: u8, message: &str) {
+    trace!("{} called with value: {}", message, value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
+  }
+
   /*
   ============================================================================================
                                   Opcodes
@@ -512,7 +518,7 @@ impl CPU {
     self.status_register.handle_z_flag(value, message);
   }
 
-  /// Shifts all bits left one position
+  /// Shifts all bits right one position
   ///
   /// Affects flags N Z C
   fn lsr(&mut self, value: u8) -> u8 {
@@ -562,6 +568,77 @@ impl CPU {
     let value = self.memory.get_u16(mod_index);
     let result = self.lsr(value);
     self.memory.set(mod_index, result);
+  }
+
+  pub fn nop(&mut self) {
+    // do nothing - but take cycle time
+  }
+
+  pub fn ora(&mut self, value: u8) {
+    let message = "ORA";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let result = self.accumulator.get() | value;
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  pub fn tax(&mut self) {
+    self.x_register.set(self.accumulator.get());
+    self.register_operation(self.x_register.get(), "TAX");
+  }
+
+  pub fn txa(&mut self) {
+    self.accumulator.set(self.x_register.get());
+    self.register_operation(self.x_register.get(), "TXA");
+  }
+
+  pub fn dex(&mut self) {
+    self.x_register.decrement();
+    self.register_operation(self.x_register.get(), "DEX");
+  }
+
+  pub fn inx(&mut self) {
+    self.x_register.increment();
+    self.register_operation(self.x_register.get(), "INX");
+  }
+
+  pub fn tay(&mut self) {
+    self.y_register.set(self.accumulator.get());
+    self.register_operation(self.y_register.get(), "TAY");
+  }
+
+  pub fn tya(&mut self) {
+    self.accumulator.set(self.y_register.get());
+    self.register_operation(self.y_register.get(), "TYA");
+  }
+
+  pub fn dey(&mut self) {
+    self.y_register.decrement();
+    self.register_operation(self.y_register.get(), "DEY");
+  }
+
+  pub fn iny(&mut self) {
+    self.y_register.increment();
+    self.register_operation(self.y_register.get(), "INY");
+  }
+
+  fn rol(&mut self, value: u8) -> u8 {
+    let (mut result, carry) = value.overflowing_shl(1);
+    if self.status_register.is_carry_bit_set() {
+      result |= 0x1;
+    }
+    if carry {
+      self.status_register.set_carry_bit();
+    }
+    self.status_register.handle_n_flag(result, "ROL");
+    self.status_register.handle_z_flag(result, "ROL");
+    result
+  }
+
+  pub fn rol_accumulator(&mut self) {
+    let result = self.rol(self.accumulator.get());
+    self.accumulator.set(result);
   }
 
   pub fn sec(&mut self) {
