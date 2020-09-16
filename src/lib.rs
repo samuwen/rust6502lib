@@ -66,7 +66,7 @@ impl CPU {
   pub fn run(&mut self, program: Vec<u8>) {
     self.load_program_into_memory(&program);
     loop {
-      let opcode = self.program_counter.get_single_operand(&self.memory);
+      let opcode = self.get_single_operand();
       CPU::wait_for_cycle();
       match opcode {
         0x24 => self.zero_page("BIT", &mut CPU::bit),
@@ -85,6 +85,17 @@ impl CPU {
     }
   }
 
+  fn get_single_operand(&mut self) -> u8 {
+    self.memory.get_u16(self.program_counter.get_and_increase())
+  }
+
+  fn get_two_operands(&mut self) -> [u8; 2] {
+    [
+      self.memory.get_u16(self.program_counter.get_and_increase()),
+      self.memory.get_u16(self.program_counter.get_and_increase()),
+    ]
+  }
+
   /*
   ============================================================================================
                                   Generic operations
@@ -92,28 +103,28 @@ impl CPU {
   */
 
   fn immediate<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     trace!("{} immediate called with operand:0x{:X}", name, op);
     cb(self, op);
   }
 
   /// Generically handles zero page retrieval operations and calls a callback when complete
   fn zero_page<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     trace!("{} zero page called with index: 0x{:X}", name, index);
     let value = self.memory.get_zero_page(index);
     cb(self, value);
   }
 
   fn zp_reg<F: FnMut(&mut Self, u8)>(&mut self, name: &str, reg_val: u8, cb: &mut F) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     trace!("{} zero page x called with operand: 0x{:X}", name, op);
     let index = op.wrapping_add(reg_val);
     cb(self, self.memory.get_zero_page(index));
   }
 
   fn absolute<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("{} absolute called with index: 0x{:X}", name, index);
     let value = self.memory.get_u16(index);
@@ -121,7 +132,7 @@ impl CPU {
   }
 
   fn absolute_x<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("{} absolute x called with index: 0x{:X}", name, index);
     let value = self
@@ -131,7 +142,7 @@ impl CPU {
   }
 
   fn absolute_y<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("{} absolute y called with index: 0x{:X}", name, index);
     let value = self
@@ -142,7 +153,7 @@ impl CPU {
 
   /// AKA Indexed indirect AKA pre-indexed
   fn indexed_x<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     trace!("{} indexed x called with operand: 0x{:X}", name, op);
     let value = self.memory.get_pre_indexed_data(op, self.x_register.get());
     cb(self, value);
@@ -150,7 +161,7 @@ impl CPU {
 
   /// AKA Indirect indexed AKA post-indexed
   fn indexed_y<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     trace!("{} indexed y called with operand: 0x{:X}", name, op);
     let value = self.memory.get_post_indexed_data(op, self.y_register.get());
     cb(self, value);
@@ -241,7 +252,7 @@ impl CPU {
   }
 
   pub fn asl_zero_page(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     trace!("ASL zero page called with index: 0x{:X}", index);
     let value = self.memory.get_zero_page(index);
     let result = self.asl(value);
@@ -249,7 +260,7 @@ impl CPU {
   }
 
   pub fn asl_zero_page_x(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     trace!("ASL zero page x called with index: 0x{:X}", index);
     let mod_index = index.wrapping_add(self.x_register.get());
     let value = self.memory.get_zero_page(mod_index);
@@ -258,7 +269,7 @@ impl CPU {
   }
 
   pub fn asl_absolute(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("ASL absolute called with index: 0x{:X}", index);
     let value = self.memory.get_u16(index);
@@ -267,7 +278,7 @@ impl CPU {
   }
 
   pub fn asl_absolute_x(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("ASL absolute called with index: 0x{:X}", index);
     let mod_index = index.wrapping_add(self.x_register.get() as u16);
@@ -294,42 +305,42 @@ impl CPU {
   }
 
   pub fn bpl(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(!self.status_register.is_negative_bit_set(), op);
   }
 
   pub fn bmi(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(self.status_register.is_negative_bit_set(), op);
   }
 
   pub fn bvc(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(!self.status_register.is_overflow_bit_set(), op);
   }
 
   pub fn bvs(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(self.status_register.is_overflow_bit_set(), op);
   }
 
   pub fn bcc(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(!self.status_register.is_carry_bit_set(), op);
   }
 
   pub fn bcs(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(self.status_register.is_carry_bit_set(), op);
   }
 
   pub fn bne(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(!self.status_register.is_zero_bit_set(), op);
   }
 
   pub fn beq(&mut self) {
-    let op = self.program_counter.get_single_operand(&self.memory);
+    let op = self.get_single_operand();
     self.branch(self.status_register.is_zero_bit_set(), op);
   }
 
@@ -370,24 +381,24 @@ impl CPU {
   }
 
   pub fn dec_zp(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     self.dec(index as u16);
   }
 
   pub fn dec_zp_reg(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     let index = index.wrapping_add(self.x_register.get());
     self.dec(index as u16);
   }
 
   pub fn dec_abs(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     self.dec(index as u16);
   }
 
   pub fn dec_abs_x(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     let index = index.wrapping_add(self.x_register.get() as u16);
     self.dec(index as u16);
@@ -412,37 +423,37 @@ impl CPU {
   }
 
   pub fn inc_zp(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     self.inc(index as u16);
   }
 
   pub fn inc_zp_reg(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     let index = index.wrapping_add(self.x_register.get());
     self.inc(index as u16);
   }
 
   pub fn inc_abs(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     self.inc(index as u16);
   }
 
   pub fn inc_abs_x(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     let index = index.wrapping_add(self.x_register.get() as u16);
     self.inc(index as u16);
   }
 
   pub fn jmp_absolute(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     self.program_counter.jump(index);
   }
 
   pub fn jmp_indirect(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let (low_test, overflow) = ops[0].overflowing_add(1);
     if overflow {
       warn!("Indirect jump overflowing page. Results will be weird!");
@@ -499,7 +510,7 @@ impl CPU {
   }
 
   pub fn sta_zero_page(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
       self.accumulator.get(),
@@ -509,7 +520,7 @@ impl CPU {
   }
 
   pub fn sta_zero_page_x(&mut self) {
-    let index = self.program_counter.get_single_operand(&self.memory);
+    let index = self.get_single_operand();
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
       self.accumulator.get(),
@@ -522,7 +533,7 @@ impl CPU {
   }
 
   pub fn sta_absolute(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
@@ -533,7 +544,7 @@ impl CPU {
   }
 
   pub fn sta_absolute_x(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops).wrapping_add(self.x_register.get() as u16);
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
@@ -544,7 +555,7 @@ impl CPU {
   }
 
   pub fn sta_absolute_y(&mut self) {
-    let ops = self.program_counter.get_two_operands(&self.memory);
+    let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops).wrapping_add(self.y_register.get() as u16);
     trace!(
       "STA storing 0x{:X} at 0x{:X}",
@@ -555,7 +566,7 @@ impl CPU {
   }
 
   pub fn sta_indexed_x(&mut self) {
-    let operand = self.program_counter.get_single_operand(&self.memory);
+    let operand = self.get_single_operand();
     let index = self
       .memory
       .get_pre_adjusted_index(operand, self.x_register.get());
@@ -568,7 +579,7 @@ impl CPU {
   }
 
   pub fn sta_indexed_y(&mut self) {
-    let operand = self.program_counter.get_single_operand(&self.memory);
+    let operand = self.get_single_operand();
     let index = self
       .memory
       .get_post_adjusted_index(operand, self.y_register.get());

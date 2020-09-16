@@ -18,19 +18,6 @@ impl ProgramCounter {
     self.value as usize
   }
 
-  /// Gets the value at the program counter then advances by 1
-  pub fn get_single_operand(&mut self, memory: &Memory) -> u8 {
-    memory.get_u16(self.get_and_increase())
-  }
-
-  /// Gets the next two values at the program counter and increases by 2
-  pub fn get_two_operands(&mut self, memory: &Memory) -> [u8; 2] {
-    [
-      memory.get_u16(self.get_and_increase()),
-      memory.get_u16(self.get_and_increase()),
-    ]
-  }
-
   pub fn increase(&mut self, amount: u8) {
     self.value += amount as u16;
   }
@@ -43,7 +30,7 @@ impl ProgramCounter {
     self.value = index;
   }
 
-  fn get_and_increase(&mut self) -> u16 {
+  pub fn get_and_increase(&mut self) -> u16 {
     let v = self.value;
     self.increase(1);
     v
