@@ -375,6 +375,7 @@ impl CPU {
   pub fn dec(&mut self, index: u16) {
     let value = self.memory.get_u16(index);
     let value = value.wrapping_sub(1);
+    trace!("DEC called index: {}, value: {}", index, value);
     self.memory.set(index, value);
     self.status_register.handle_n_flag(value, "DEC");
     self.status_register.handle_z_flag(value, "DEC");
@@ -417,6 +418,7 @@ impl CPU {
   pub fn inc(&mut self, index: u16) {
     let value = self.memory.get_u16(index);
     let value = value.wrapping_add(1);
+    trace!("INC called index: {}, value: {}", index, value);
     self.memory.set(index, value);
     self.status_register.handle_n_flag(value, "INC");
     self.status_register.handle_z_flag(value, "INC");
@@ -449,6 +451,7 @@ impl CPU {
   pub fn jmp_absolute(&mut self) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
+    trace!("JMP absolute to index: {}", index);
     self.program_counter.jump(index);
   }
 
@@ -461,6 +464,18 @@ impl CPU {
     let hi = self.memory.get_u16(u16::from_le_bytes(ops));
     let lo = self.memory.get_u16(u16::from_le_bytes([low_test, ops[1]]));
     let index = u16::from_le_bytes([hi, lo]);
+    trace!("JMP indirect to index: {}", index);
+    self.program_counter.jump(index);
+  }
+
+  pub fn jsr(&mut self) {
+    let ops = self.get_two_operands();
+    self.program_counter.decrease(1);
+    let pc_ops = self.program_counter.get().to_le_bytes();
+    self.memory.push_to_stack(pc_ops[0]);
+    self.memory.push_to_stack(pc_ops[1]);
+    let index = u16::from_le_bytes(ops);
+    trace!("JSR to index: {}, PC stored on stack", index,);
     self.program_counter.jump(index);
   }
 
@@ -495,6 +510,58 @@ impl CPU {
     self.y_register.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
+  }
+
+  /// Shifts all bits left one position
+  ///
+  /// Affects flags N Z C
+  fn lsr(&mut self, value: u8) -> u8 {
+    let (result, carry) = value.overflowing_shr(1);
+    self.status_register.handle_n_flag(result, "LSR");
+    self.status_register.handle_z_flag(result, "LSR");
+    self.status_register.handle_c_flag("LSR", carry);
+    result
+  }
+
+  pub fn lsr_accumulator(&mut self) {
+    let result = self.lsr(self.accumulator.get());
+    self.accumulator.set(result);
+  }
+
+  pub fn lsr_zero_page(&mut self) {
+    let index = self.get_single_operand();
+    trace!("LSR zero page called with index: 0x{:X}", index);
+    let value = self.memory.get_zero_page(index);
+    let result = self.lsr(value);
+    self.memory.set_zero_page(index, result);
+  }
+
+  pub fn lsr_zero_page_x(&mut self) {
+    let index = self.get_single_operand();
+    trace!("LSR zero page x called with index: 0x{:X}", index);
+    let mod_index = index.wrapping_add(self.x_register.get());
+    let value = self.memory.get_zero_page(mod_index);
+    let result = self.lsr(value);
+    self.memory.set_zero_page(mod_index, result);
+  }
+
+  pub fn lsr_absolute(&mut self) {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
+    trace!("LSR absolute called with index: 0x{:X}", index);
+    let value = self.memory.get_u16(index);
+    let result = self.lsr(value);
+    self.memory.set(index, result);
+  }
+
+  pub fn lsr_absolute_x(&mut self) {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
+    trace!("LSR absolute called with index: 0x{:X}", index);
+    let mod_index = index.wrapping_add(self.x_register.get() as u16);
+    let value = self.memory.get_u16(mod_index);
+    let result = self.lsr(value);
+    self.memory.set(mod_index, result);
   }
 
   pub fn sec(&mut self) {
