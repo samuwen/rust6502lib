@@ -1,5 +1,3 @@
-use crate::memory::Memory;
-
 pub struct ProgramCounter {
   value: u16,
 }

@@ -15,6 +15,10 @@ impl StackPointer {
     self.value
   }
 
+  pub fn set(&mut self, val: u8) {
+    self.value = val;
+  }
+
   pub fn push(&mut self) -> u16 {
     let val = self.value;
     self.value = self.value.wrapping_sub(1);
