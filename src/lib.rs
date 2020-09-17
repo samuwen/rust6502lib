@@ -6,7 +6,7 @@ use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
 
-const STARTING_MEMORY_BLOCK: u16 = 0x8000;
+pub const STARTING_MEMORY_BLOCK: u16 = 0x8000;
 
 // TODO: Memory space is 256 pages of 256 bytes. If a page index (hi byte) is incremented
 // Cycles should be incremented as well per "page boundary crossing"
@@ -69,7 +69,7 @@ impl CPU {
   /// Waits for a timing signal to be available at the clock pin.
   fn sync(&mut self) {
     while !self.clock_pin {
-      // do nothing
+      self.check_pins();
     }
     self.clock_pin = false;
   }
@@ -103,6 +103,73 @@ impl CPU {
     }
   }
 
+  fn push_to_stack(&mut self, value: u8) {
+    self.memory.push_to_stack(value);
+    self.sync();
+  }
+
+  fn pop_from_stack(&mut self) -> u8 {
+    let val = self.memory.pop_from_stack();
+    self.sync();
+    val
+  }
+
+  fn get_u16(&mut self, index: u16) -> u8 {
+    let val = self.memory.get_u16(index);
+    self.sync();
+    val
+  }
+
+  fn set_u16(&mut self, index: u16, value: u8) {
+    self.memory.set(index, value);
+    self.sync();
+  }
+
+  fn get_zero_page(&mut self, index: u8) -> u8 {
+    let val = self.memory.get_zero_page(index);
+    self.sync();
+    val
+  }
+
+  fn set_zero_page(&mut self, index: u8, value: u8) {
+    self.memory.set_zero_page(index, value);
+    self.sync();
+  }
+
+  /// Used to get the x register when it costs a cycle. This is inconsistent
+  /// and I'm sure is kind of wrong.
+  fn get_x_register(&mut self) -> u8 {
+    let val = self.x_register.get();
+    self.sync();
+    val
+  }
+
+  fn get_single_operand(&mut self) -> u8 {
+    let op = self.memory.get_u16(self.program_counter.get_and_increase());
+    self.sync();
+    op
+  }
+
+  fn get_two_operands(&mut self) -> [u8; 2] {
+    let lo = self.memory.get_u16(self.program_counter.get_and_increase());
+    self.sync();
+    let hi = self.memory.get_u16(self.program_counter.get_and_increase());
+    self.sync();
+    [lo, hi]
+  }
+
+  fn test_for_overflow(&mut self, op1: u8, op2: u8) {
+    let (_, overflow) = op1.overflowing_add(op2);
+    if overflow {
+      self.sync();
+    }
+  }
+
+  fn jump(&mut self, index: u16) {
+    self.program_counter.jump(index);
+    self.sync();
+  }
+
   /// Runs a program while there are opcodes to handle. This will change when we actually have
   /// a real data set to operate against.
   pub fn run(&mut self, program: Vec<u8>) {
@@ -118,23 +185,15 @@ impl CPU {
         0x69 => self.immediate_cb("ADC", &mut Self::adc),
         0x6D => self.absolute_cb("ADC", &mut Self::adc),
         0x71 => self.indexed_y_cb("ADC", &mut Self::adc),
-        0x75 => self.zp_reg_cb("ADC", self.x_register.get(), &mut Self::adc),
+        0x75 => {
+          let x_val = self.get_x_register();
+          self.zp_reg_cb("ADC", x_val, &mut Self::adc)
+        }
         0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         _ => (),
       }
     }
-  }
-
-  fn get_single_operand(&mut self) -> u8 {
-    self.memory.get_u16(self.program_counter.get_and_increase())
-  }
-
-  fn get_two_operands(&mut self) -> [u8; 2] {
-    [
-      self.memory.get_u16(self.program_counter.get_and_increase()),
-      self.memory.get_u16(self.program_counter.get_and_increase()),
-    ]
   }
 
   /*
@@ -146,6 +205,7 @@ impl CPU {
   fn immediate(&mut self, name: &str) -> u8 {
     let op = self.get_single_operand();
     trace!("{} immediate called with operand:0x{:X}", name, op);
+    self.sync();
     op
   }
 
@@ -157,7 +217,7 @@ impl CPU {
   fn zero_page(&mut self, name: &str) -> (u8, u8) {
     let index = self.get_single_operand();
     trace!("{} zero page called with index: 0x{:X}", name, index);
-    (index, self.memory.get_zero_page(index))
+    (index, self.get_zero_page(index))
   }
 
   fn zero_page_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
@@ -165,22 +225,23 @@ impl CPU {
     cb(self, value);
   }
 
-  fn zp_reg(&mut self, name: &str, reg_val: u8) -> u8 {
+  fn zp_reg(&mut self, name: &str, reg_val: u8) -> (u8, u8) {
     let op = self.get_single_operand();
     trace!("{} zero page x called with operand: 0x{:X}", name, op);
-    op.wrapping_add(reg_val)
+    let index = op.wrapping_add(reg_val);
+    (index, self.get_zero_page(index))
   }
 
   fn zp_reg_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, reg_val: u8, cb: &mut F) {
-    let index = self.zp_reg(name, reg_val);
-    cb(self, self.memory.get_zero_page(index));
+    let (_, value) = self.zp_reg(name, reg_val);
+    cb(self, value);
   }
 
   fn absolute(&mut self, name: &str) -> (u16, u8) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("{} absolute called with index: 0x{:X}", name, index);
-    (index, self.memory.get_u16(index))
+    (index, self.get_u16(index))
   }
 
   fn absolute_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
@@ -192,7 +253,9 @@ impl CPU {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     trace!("{} absolute reg called with index: 0x{:X}", name, index);
-    (index, self.memory.get_u16(index.wrapping_add(reg as u16)))
+    let total = index.wrapping_add(reg as u16);
+    self.test_for_overflow(ops[1], reg);
+    (index, self.get_u16(total))
   }
 
   fn absolute_x_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
@@ -209,10 +272,12 @@ impl CPU {
   fn indexed_x(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     trace!("{} indexed x called with operand: 0x{:X}", name, op);
-    let index = self
-      .memory
-      .get_pre_adjusted_index(op, self.x_register.get());
-    (index, self.memory.get_u16(index))
+    let x_val = self.get_x_register();
+    let modified_op = op.wrapping_add(x_val);
+    let lo = self.get_zero_page(modified_op);
+    let hi = self.get_zero_page(modified_op.wrapping_add(1));
+    let index = u16::from_le_bytes([lo, hi]);
+    (index, self.get_u16(index))
   }
 
   fn indexed_x_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
@@ -224,9 +289,11 @@ impl CPU {
   fn indexed_y(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     trace!("{} indexed y called with operand: 0x{:X}", name, op);
-    let index = self
-      .memory
-      .get_post_adjusted_index(op, self.x_register.get());
+    let y_val = self.y_register.get();
+    let lo = self.get_zero_page(op);
+    let hi = self.get_zero_page(op.wrapping_add(1));
+    let index = u16::from_le_bytes([lo, hi]);
+    self.test_for_overflow(hi, y_val);
     (index, self.memory.get_u16(index))
   }
 
@@ -242,12 +309,16 @@ impl CPU {
 
   fn branch(&mut self, condition: bool, op: u8) {
     if condition {
+      let overflow;
       if op > 0x7F {
-        println!("decreasing");
-        self.program_counter.decrease(!op + 1);
+        overflow = self.program_counter.decrease(!op + 1);
       } else {
-        self.program_counter.increase(op);
+        overflow = self.program_counter.increase(op);
       }
+      if overflow {
+        self.sync();
+      }
+      self.sync();
     }
   }
 
@@ -270,25 +341,54 @@ impl CPU {
     self.status_register.handle_z_flag(value, message);
   }
 
-  fn interrupt(&mut self) {
-    // internal operations for 2 cycles
-    // push return address hi byte onto stack
-    // push return address lo byte onto stack
-    // push status_register onto stack
-    // get IRQ vector lo byte from $FFFE | get NMI vector lo byte from $FFFA
-    // get IRQ vector hi byte from $FFFF | get NMI vector hi byte from $FFFB
+  /*
+  ============================================================================================
+                                  Interrupts
+  ============================================================================================
+  */
+
+  fn interrupt(&mut self, low_vec: u16, hi_vec: u16) -> u16 {
+    self.internal_operations();
+    let ops = self.program_counter.to_le_bytes();
+    self.push_to_stack(ops[0]);
+    self.push_to_stack(ops[1]);
+    self.push_to_stack(self.status_register.get_register());
+    let lo = self.get_u16(low_vec);
+    let hi = self.get_u16(hi_vec);
+    u16::from_le_bytes([lo, hi])
   }
 
+  fn return_from_interrupt(&mut self) {
+    self.internal_operations();
+    let status_reg = self.pop_from_stack();
+    self.status_register.set(status_reg);
+    let hi_pc = self.pop_from_stack();
+    let lo_pc = self.pop_from_stack();
+    self.jump(u16::from_le_bytes([lo_pc, hi_pc]));
+  }
+
+  /// Unspecified thing that delays execution by two cycles.
+  fn internal_operations(&mut self) {
+    self.sync();
+    self.sync();
+  }
+
+  /// Resets the system. Some data will be left over after depending on where
+  /// the program was in the execution cycle
   fn reset_interrupt(&mut self) {
-    // stub
+    let index = self.interrupt(0xFFFC, 0xFFFD);
+    self.program_counter.jump(index);
+    self.reset();
   }
 
   fn nmi_interrupt(&mut self) {
-    // stub
+    let index = self.interrupt(0xFFFA, 0xFFFB);
+    self.program_counter.jump(index);
   }
 
   fn irq_interrupt(&mut self) {
-    // stub
+    let index = self.interrupt(0xFFFE, 0xFFFF);
+    self.program_counter.jump(index);
   }
 
   /*
@@ -337,6 +437,7 @@ impl CPU {
     let message = "ASL";
     trace!("{} called with value: 0x{:X}", message, value);
     let (result, carry) = value.overflowing_shl(1);
+    self.sync();
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
     self.status_register.handle_c_flag(message, carry);
@@ -351,31 +452,32 @@ impl CPU {
   pub fn asl_zero_page(&mut self) {
     let (index, value) = self.zero_page("ASL");
     let result = self.asl(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn asl_zero_page_x(&mut self) {
-    let index = self.zp_reg("ASL", self.x_register.get());
-    let value = self.memory.get_zero_page(index);
+    let x_val = self.get_x_register();
+    let (index, value) = self.zp_reg("ASL", x_val);
     let result = self.asl(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn asl_absolute(&mut self) {
     let (index, value) = self.absolute("ASL");
     let result = self.asl(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   pub fn asl_absolute_x(&mut self) {
-    let (index, value) = self.absolute_reg("ASL", self.x_register.get());
+    let x_val = self.get_x_register();
+    let (index, value) = self.absolute_reg("ASL", x_val);
     let result = self.asl(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   /// Tests a value and sets flags accordingly.
   ///
-  /// Zero is set by looking at the result of the value AND with the accumulator.
+  /// Zero is set by looking at the result of the value AND the accumulator.
   /// N & V are set by bits 7 & 6 of the value respectively.
   ///
   /// Affects flags N V Z
@@ -431,7 +533,8 @@ impl CPU {
   }
 
   pub fn brk(&mut self) {
-    // stub
+    self.program_counter.increment();
+    self.nmi_interrupt();
   }
 
   pub fn cmp(&mut self, test_value: u8) {
@@ -463,10 +566,10 @@ impl CPU {
   }
 
   pub fn dec(&mut self, index: u16) {
-    let value = self.memory.get_u16(index);
+    let value = self.get_u16(index);
     let value = value.wrapping_sub(1);
     trace!("DEC called index: {}, value: {}", index, value);
-    self.memory.set(index, value);
+    self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "DEC");
     self.status_register.handle_z_flag(value, "DEC");
   }
@@ -477,7 +580,8 @@ impl CPU {
   }
 
   pub fn dec_zp_reg(&mut self) {
-    let index = self.zp_reg("DEC", self.x_register.get());
+    let x_val = self.get_x_register();
+    let (index, _) = self.zp_reg("DEC", x_val);
     self.dec(index as u16);
   }
 
@@ -516,7 +620,7 @@ impl CPU {
   }
 
   pub fn inc_zp_reg(&mut self) {
-    let index = self.zp_reg("INC", self.x_register.get());
+    let (index, _) = self.zp_reg("INC", self.x_register.get());
     self.inc(index as u16);
   }
 
@@ -617,8 +721,7 @@ impl CPU {
   }
 
   pub fn lsr_zero_page_x(&mut self) {
-    let index = self.zp_reg("LSR", self.x_register.get());
-    let value = self.memory.get_zero_page(index);
+    let (index, value) = self.zp_reg("LSR", self.x_register.get());
     let result = self.lsr(value);
     self.memory.set_zero_page(index, result);
   }
@@ -714,8 +817,7 @@ impl CPU {
   }
 
   pub fn rol_zero_page_x(&mut self) {
-    let index = self.zp_reg("ROL", self.x_register.get());
-    let value = self.memory.get_zero_page(index);
+    let (index, value) = self.zp_reg("ROL", self.x_register.get());
     let result = self.rol(value);
     self.memory.set_zero_page(index, result);
   }
@@ -758,8 +860,7 @@ impl CPU {
   }
 
   pub fn ror_zero_page_x(&mut self) {
-    let index = self.zp_reg("ROR", self.x_register.get());
-    let value = self.memory.get_zero_page(index);
+    let (index, value) = self.zp_reg("ROR", self.x_register.get());
     let result = self.ror(value);
     self.memory.set_zero_page(index, result);
   }
@@ -778,7 +879,7 @@ impl CPU {
 
   /// Return from interrupt
   pub fn rti(&mut self) {
-    // stub
+    self.return_from_interrupt();
   }
 
   pub fn rts(&mut self) {
@@ -817,7 +918,7 @@ impl CPU {
   }
 
   pub fn sta_zero_page_x(&mut self) {
-    let index = self.zp_reg("STA", self.x_register.get());
+    let (index, _) = self.zp_reg("STA", self.x_register.get());
     self.memory.set_zero_page(index, self.accumulator.get());
   }
 
@@ -878,7 +979,7 @@ impl CPU {
   }
 
   pub fn stx_zero_page_y(&mut self) {
-    let index = self.zp_reg("STX", self.y_register.get());
+    let (index, _) = self.zp_reg("STX", self.y_register.get());
     self.memory.set_zero_page(index, self.x_register.get());
   }
 
@@ -893,7 +994,7 @@ impl CPU {
   }
 
   pub fn sty_zero_page_y(&mut self) {
-    let index = self.zp_reg("STY", self.x_register.get());
+    let (index, _) = self.zp_reg("STY", self.x_register.get());
     self.memory.set_zero_page(index, self.y_register.get());
   }
 
