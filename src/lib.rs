@@ -5,10 +5,8 @@ use log::{trace, warn};
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
-use std::time::Duration;
 
 const STARTING_MEMORY_BLOCK: u16 = 0x8000;
-const TIME_PER_CYCLE: u64 = 1790;
 
 // TODO: Memory space is 256 pages of 256 bytes. If a page index (hi byte) is incremented
 // Cycles should be incremented as well per "page boundary crossing"
@@ -21,6 +19,10 @@ pub struct CPU {
   y_register: GeneralRegister,
   status_register: StatusRegister,
   memory: Memory,
+  reset_pin: bool,
+  nmi_pin: bool,
+  irq_pin: bool,
+  clock_pin: bool,
 }
 
 impl CPU {
@@ -34,6 +36,10 @@ impl CPU {
       y_register: GeneralRegister::new(),
       status_register: StatusRegister::new(),
       memory: Memory::new(),
+      reset_pin: false,
+      nmi_pin: false,
+      irq_pin: false,
+      clock_pin: false,
     }
   }
 
@@ -45,6 +51,10 @@ impl CPU {
     self.y_register.reset();
     self.status_register.reset();
     self.memory.reset();
+    self.reset_pin = false;
+    self.irq_pin = false;
+    self.nmi_pin = false;
+    self.clock_pin = false;
     trace!("CPU Reset")
   }
 
@@ -56,9 +66,41 @@ impl CPU {
     }
   }
 
-  /// Allows us to suspend the thread for a cycle
-  fn wait_for_cycle() {
-    std::thread::sleep(Duration::from_micros(TIME_PER_CYCLE));
+  /// Waits for a timing signal to be available at the clock pin.
+  fn sync(&mut self) {
+    while !self.clock_pin {
+      // do nothing
+    }
+    self.clock_pin = false;
+  }
+
+  /// Simulates signal to the clock pin, enabling the next cycle to execute.
+  pub fn tick(&mut self) {
+    self.clock_pin = true;
+  }
+
+  pub fn set_reset(&mut self) {
+    self.reset_pin = true;
+  }
+
+  pub fn set_nmi(&mut self) {
+    self.nmi_pin = true;
+  }
+
+  pub fn set_irq(&mut self) {
+    self.irq_pin = true;
+  }
+
+  fn check_pins(&mut self) {
+    if self.reset_pin {
+      self.reset_interrupt();
+    }
+    if self.nmi_pin {
+      self.nmi_interrupt();
+    }
+    if self.irq_pin && !self.status_register.is_break_bit_set() {
+      self.irq_interrupt();
+    }
   }
 
   /// Runs a program while there are opcodes to handle. This will change when we actually have
@@ -67,7 +109,6 @@ impl CPU {
     self.load_program_into_memory(&program);
     loop {
       let opcode = self.get_single_operand();
-      CPU::wait_for_cycle();
       match opcode {
         0x24 => self.zero_page_cb("BIT", &mut Self::bit),
         0x29 => self.immediate_cb("AND", &mut Self::and),
@@ -229,6 +270,27 @@ impl CPU {
     self.status_register.handle_z_flag(value, message);
   }
 
+  fn interrupt(&mut self) {
+    // internal operations for 2 cycles
+    // push return address hi byte onto stack
+    // push return address lo byte onto stack
+    // push status_register onto stack
+    // get IRQ vector lo byte from $FFFE | get NMI vector lo byte from $FFFA
+    // get IRQ vector hi byte from $FFFF | get NMI vector hi byte from $FFFB
+  }
+
+  fn reset_interrupt(&mut self) {
+    // stub
+  }
+
+  fn nmi_interrupt(&mut self) {
+    // stub
+  }
+
+  fn irq_interrupt(&mut self) {
+    // stub
+  }
+
   /*
   ============================================================================================
                                   Opcodes
@@ -366,6 +428,10 @@ impl CPU {
   pub fn beq(&mut self) {
     let op = self.get_single_operand();
     self.branch(self.status_register.is_zero_bit_set(), op);
+  }
+
+  pub fn brk(&mut self) {
+    // stub
   }
 
   pub fn cmp(&mut self, test_value: u8) {
