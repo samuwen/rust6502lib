@@ -227,6 +227,7 @@ impl CPU {
         0x68 => self.pla(),
         0x69 => self.immediate_cb("ADC", &mut Self::adc),
         0x6A => self.ror_accumulator(),
+        0x6B => self.immediate_cb("ARR", &mut Self::arr),
         0x6C => self.jmp_indirect(),
         0x6D => self.absolute_cb("ADC", &mut Self::adc),
         0x6E => self.ror_absolute(),
@@ -239,19 +240,23 @@ impl CPU {
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         0x7E => self.ror_absolute_x(),
         0x81 => self.sta_indexed_x(),
+        0x83 => self.aax_indirect_x(),
         0x84 => self.sty_zero_page(),
         0x85 => self.sta_zero_page(),
         0x86 => self.stx_zero_page(),
+        0x87 => self.aax_zero_page(),
         0x88 => self.dey(),
         0x8A => self.txa(),
         0x8C => self.sty_absolute(),
         0x8D => self.sta_absolute(),
         0x8E => self.stx_absolute(),
+        0x8F => self.aax_absolute(),
         0x90 => self.bcc(),
         0x91 => self.sta_indexed_y(),
         0x94 => self.sty_zero_page_x(),
         0x95 => self.sta_zero_page_x(),
         0x96 => self.stx_zero_page_y(),
+        0x97 => self.aax_zero_page_y(),
         0x98 => self.tya(),
         0x99 => self.sta_absolute_y(),
         0x9A => self.txs(),
@@ -503,6 +508,32 @@ impl CPU {
     self.sync();
   }
 
+  fn rotate_right(&mut self, value: u8) -> u8 {
+    let mut result = value.wrapping_shr(1);
+    if self.status_register.is_carry_bit_set() {
+      result |= 0x80;
+    }
+    if value & 0x1 == 1 {
+      self.status_register.set_carry_bit();
+    } else {
+      self.status_register.clear_carry_bit();
+    }
+    result
+  }
+
+  fn rotate_left(&mut self, value: u8) -> u8 {
+    let mut result = value.wrapping_shl(1);
+    if self.status_register.is_carry_bit_set() {
+      result |= 0x1;
+    }
+    if value & 0x80 == 0x80 {
+      self.status_register.set_carry_bit();
+    } else {
+      self.status_register.clear_carry_bit();
+    }
+    result
+  }
+
   /*
   ============================================================================================
                                   Interrupts
@@ -605,6 +636,35 @@ impl CPU {
   pub fn aax_absolute(&mut self) {
     let index = self.absolute_index("AAX");
     self.aax(index);
+  }
+
+  /// Illegal opcode. And operand with accumulator, then rotate one bit right, then
+  /// check bits 5 and 6.
+  ///
+  /// Affects flags N V Z C
+  pub fn arr(&mut self, value: u8) {
+    let message = "ARR";
+    warn!("{} called. Something might be borked.", message);
+    let result = self.accumulator.get() & value;
+    let result = self.rotate_right(result);
+    self.accumulator.set(result);
+    let b5 = (result & 0x20) >> 5;
+    let b6 = (result & 0x40) >> 6;
+    if b5 == 1 && b6 == 1 {
+      self.status_register.set_carry_bit();
+      self.status_register.clear_overflow_bit();
+    } else if b5 == 0 && b6 == 0 {
+      self.status_register.clear_carry_bit();
+      self.status_register.clear_overflow_bit();
+    } else if b5 == 1 && b6 == 0 {
+      self.status_register.set_overflow_bit();
+      self.status_register.clear_carry_bit();
+    } else {
+      self.status_register.set_overflow_bit();
+      self.status_register.set_carry_bit();
+    }
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_n_flag(result, message);
   }
 
   /// Adds the value given to the accumulator
@@ -1015,15 +1075,9 @@ impl CPU {
 
   fn rol(&mut self, value: u8) -> u8 {
     trace!("ROL called with value: {}", value);
-    let (mut result, carry) = value.overflowing_shl(1);
+    let result = self.rotate_left(value);
     // extra cycle for modification
     self.sync();
-    if self.status_register.is_carry_bit_set() {
-      result |= 0x1;
-    }
-    if carry {
-      self.status_register.set_carry_bit();
-    }
     self.status_register.handle_n_flag(result, "ROL");
     self.status_register.handle_z_flag(result, "ROL");
     result
@@ -1060,15 +1114,9 @@ impl CPU {
 
   fn ror(&mut self, value: u8) -> u8 {
     trace!("ROR called with value: {}", value);
-    let (mut result, carry) = value.overflowing_shl(1);
+    let result = self.rotate_right(value);
     // extra cycle for modification
     self.sync();
-    if self.status_register.is_carry_bit_set() {
-      result |= 0x1;
-    }
-    if carry {
-      self.status_register.set_carry_bit();
-    }
     self.status_register.handle_n_flag(result, "ROR");
     self.status_register.handle_z_flag(result, "ROR");
     result
