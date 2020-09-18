@@ -26,9 +26,8 @@ impl StackPointer {
   }
 
   pub fn pop(&mut self) -> u16 {
-    let val = self.value;
     self.value = self.value.wrapping_add(1);
-    val as u16
+    self.value as u16
   }
 }
 

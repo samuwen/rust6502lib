@@ -48,21 +48,6 @@ impl Memory {
     self.mem[(0x100 | self.sp.pop()) as usize]
   }
 
-  pub fn get_pre_adjusted_index(&self, operand: u8, register: u8) -> u16 {
-    u16::from_le_bytes([
-      self.get_zero_page(operand.wrapping_add(register)),
-      self.get_zero_page(operand.wrapping_add(register).wrapping_add(1)),
-    ])
-  }
-
-  pub fn get_post_adjusted_index(&self, operand: u8, register: u8) -> u16 {
-    let unadjusted_index = u16::from_le_bytes([
-      self.get_zero_page(operand),
-      self.get_zero_page(operand.wrapping_add(1)),
-    ]);
-    unadjusted_index.wrapping_add(register as u16)
-  }
-
   pub fn get_stack_pointer(&self) -> &StackPointer {
     &self.sp
   }
@@ -115,40 +100,6 @@ mod tests {
     let mut memory = Memory::new();
     memory.mem[0x1234] = 0x56;
     assert_eq!(memory.get_u16(0x1234), 0x56);
-  }
-
-  #[test]
-  fn get_pre_indexed_data() {
-    let mut memory = Memory::new();
-    memory.mem[0x98] = 0x34;
-    memory.mem[0x99] = 0x12;
-    memory.mem[0x1234] = 0x56;
-    assert_eq!(memory.get_pre_indexed_data(0x88, 0x10), 0x56);
-  }
-
-  #[test]
-  fn get_pre_adjusted_index() {
-    let mut memory = Memory::new();
-    memory.mem[0x98] = 0x34;
-    memory.mem[0x99] = 0x12;
-    assert_eq!(memory.get_pre_adjusted_index(0x88, 0x10), 0x1234);
-  }
-
-  #[test]
-  fn get_post_indexed_data() {
-    let mut memory = Memory::new();
-    memory.mem[0x86] = 0x28;
-    memory.mem[0x87] = 0x40;
-    memory.mem[0x4038] = 0x56;
-    assert_eq!(memory.get_post_indexed_data(0x86, 0x10), 0x56);
-  }
-
-  #[test]
-  fn get_post_adjusted_index() {
-    let mut memory = Memory::new();
-    memory.mem[0x86] = 0x28;
-    memory.mem[0x87] = 0x40;
-    assert_eq!(memory.get_post_adjusted_index(0x86, 0x10), 0x4038);
   }
 
   #[test]

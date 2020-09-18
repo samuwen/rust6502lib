@@ -105,11 +105,15 @@ impl CPU {
 
   fn push_to_stack(&mut self, value: u8) {
     self.memory.push_to_stack(value);
+    // writing to memory
     self.sync();
   }
 
   fn pop_from_stack(&mut self) -> u8 {
+    // incrementing the pointer
+    self.sync();
     let val = self.memory.pop_from_stack();
+    // reading from memory
     self.sync();
     val
   }
@@ -136,14 +140,6 @@ impl CPU {
     self.sync();
   }
 
-  /// Used to get the x register when it costs a cycle. This is inconsistent
-  /// and I'm sure is kind of wrong.
-  fn get_x_register(&mut self) -> u8 {
-    let val = self.x_register.get();
-    self.sync();
-    val
-  }
-
   fn get_single_operand(&mut self) -> u8 {
     let op = self.memory.get_u16(self.program_counter.get_and_increase());
     self.sync();
@@ -165,11 +161,6 @@ impl CPU {
     }
   }
 
-  fn jump(&mut self, index: u16) {
-    self.program_counter.jump(index);
-    self.sync();
-  }
-
   /// Runs a program while there are opcodes to handle. This will change when we actually have
   /// a real data set to operate against.
   pub fn run(&mut self, program: Vec<u8>) {
@@ -185,10 +176,7 @@ impl CPU {
         0x69 => self.immediate_cb("ADC", &mut Self::adc),
         0x6D => self.absolute_cb("ADC", &mut Self::adc),
         0x71 => self.indexed_y_cb("ADC", &mut Self::adc),
-        0x75 => {
-          let x_val = self.get_x_register();
-          self.zp_reg_cb("ADC", x_val, &mut Self::adc)
-        }
+        0x75 => self.zp_reg_cb("ADC", self.x_register.get(), &mut Self::adc),
         0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         _ => (),
@@ -228,6 +216,8 @@ impl CPU {
   fn zp_reg(&mut self, name: &str, reg_val: u8) -> (u8, u8) {
     let op = self.get_single_operand();
     trace!("{} zero page x called with operand: 0x{:X}", name, op);
+    // waste a cycle
+    self.get_zero_page(op);
     let index = op.wrapping_add(reg_val);
     (index, self.get_zero_page(index))
   }
@@ -272,8 +262,7 @@ impl CPU {
   fn indexed_x(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     trace!("{} indexed x called with operand: 0x{:X}", name, op);
-    let x_val = self.get_x_register();
-    let modified_op = op.wrapping_add(x_val);
+    let modified_op = op.wrapping_add(self.x_register.get());
     let lo = self.get_zero_page(modified_op);
     let hi = self.get_zero_page(modified_op.wrapping_add(1));
     let index = u16::from_le_bytes([lo, hi]);
@@ -305,6 +294,8 @@ impl CPU {
   fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
     trace!("{} called", name);
     cb(&mut self.status_register);
+    // One byte op, all instructions require 2 cycles min.
+    self.sync();
   }
 
   fn branch(&mut self, condition: bool, op: u8) {
@@ -316,8 +307,10 @@ impl CPU {
         overflow = self.program_counter.increase(op);
       }
       if overflow {
+        // Page overflow costs a cycle
         self.sync();
       }
+      // Branch taken costs a cycle
       self.sync();
     }
   }
@@ -339,6 +332,8 @@ impl CPU {
     trace!("{} called with value: {}", message, value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
+    // One byte instruction. All instruction require minimum two bytes.
+    self.sync();
   }
 
   /*
@@ -359,12 +354,13 @@ impl CPU {
   }
 
   fn return_from_interrupt(&mut self) {
-    self.internal_operations();
     let status_reg = self.pop_from_stack();
     self.status_register.set(status_reg);
     let hi_pc = self.pop_from_stack();
     let lo_pc = self.pop_from_stack();
-    self.jump(u16::from_le_bytes([lo_pc, hi_pc]));
+    self
+      .program_counter
+      .jump(u16::from_le_bytes([lo_pc, hi_pc]));
   }
 
   /// Unspecified thing that delays execution by two cycles.
@@ -437,6 +433,7 @@ impl CPU {
     let message = "ASL";
     trace!("{} called with value: 0x{:X}", message, value);
     let (result, carry) = value.overflowing_shl(1);
+    // extra cycle for modification
     self.sync();
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
@@ -456,8 +453,7 @@ impl CPU {
   }
 
   pub fn asl_zero_page_x(&mut self) {
-    let x_val = self.get_x_register();
-    let (index, value) = self.zp_reg("ASL", x_val);
+    let (index, value) = self.zp_reg("ASL", self.x_register.get());
     let result = self.asl(value);
     self.set_zero_page(index, result);
   }
@@ -469,10 +465,11 @@ impl CPU {
   }
 
   pub fn asl_absolute_x(&mut self) {
-    let x_val = self.get_x_register();
-    let (index, value) = self.absolute_reg("ASL", x_val);
+    let (index, value) = self.absolute_reg("ASL", self.x_register.get());
     let result = self.asl(value);
     self.set_u16(index, result);
+    // extra cycle. do not know from where
+    self.sync();
   }
 
   /// Tests a value and sets flags accordingly.
@@ -568,6 +565,8 @@ impl CPU {
   pub fn dec(&mut self, index: u16) {
     let value = self.get_u16(index);
     let value = value.wrapping_sub(1);
+    // extra cycle for modification
+    self.sync();
     trace!("DEC called index: {}, value: {}", index, value);
     self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "DEC");
@@ -580,8 +579,7 @@ impl CPU {
   }
 
   pub fn dec_zp_reg(&mut self) {
-    let x_val = self.get_x_register();
-    let (index, _) = self.zp_reg("DEC", x_val);
+    let (index, _) = self.zp_reg("DEC", self.x_register.get());
     self.dec(index as u16);
   }
 
@@ -608,8 +606,10 @@ impl CPU {
   pub fn inc(&mut self, index: u16) {
     let value = self.memory.get_u16(index);
     let value = value.wrapping_add(1);
+    // extra cycle for modification
+    self.sync();
     trace!("INC called index: {}, value: {}", index, value);
-    self.memory.set(index, value);
+    self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "INC");
     self.status_register.handle_z_flag(value, "INC");
   }
@@ -647,8 +647,8 @@ impl CPU {
     if overflow {
       warn!("Indirect jump overflowing page. Results will be weird!");
     }
-    let hi = self.memory.get_u16(u16::from_le_bytes(ops));
-    let lo = self.memory.get_u16(u16::from_le_bytes([low_test, ops[1]]));
+    let hi = self.get_u16(u16::from_le_bytes(ops));
+    let lo = self.get_u16(u16::from_le_bytes([low_test, ops[1]]));
     let index = u16::from_le_bytes([hi, lo]);
     trace!("JMP indirect to index: {}", index);
     self.program_counter.jump(index);
@@ -662,6 +662,8 @@ impl CPU {
     self.memory.push_to_stack(pc_ops[1]);
     let index = u16::from_le_bytes(ops);
     trace!("JSR to index: {}, PC stored on stack", index,);
+    // extra cycle needed due the return address
+    self.sync();
     self.program_counter.jump(index);
   }
 
@@ -703,6 +705,8 @@ impl CPU {
   /// Affects flags N Z C
   fn lsr(&mut self, value: u8) -> u8 {
     let (result, carry) = value.overflowing_shr(1);
+    // extra cycle for modification
+    self.sync();
     self.status_register.handle_n_flag(result, "LSR");
     self.status_register.handle_z_flag(result, "LSR");
     self.status_register.handle_c_flag("LSR", carry);
@@ -717,29 +721,30 @@ impl CPU {
   pub fn lsr_zero_page(&mut self) {
     let (index, value) = self.zero_page("LSR");
     let result = self.lsr(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn lsr_zero_page_x(&mut self) {
     let (index, value) = self.zp_reg("LSR", self.x_register.get());
     let result = self.lsr(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn lsr_absolute(&mut self) {
     let (index, value) = self.absolute("LSR");
     let result = self.lsr(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   pub fn lsr_absolute_x(&mut self) {
     let (index, value) = self.absolute_reg("LSR", self.x_register.get());
     let result = self.lsr(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   pub fn nop(&mut self) {
-    // do nothing - but take cycle time
+    // Extra cycle as all instruction require two bytes.
+    self.sync();
   }
 
   pub fn ora(&mut self, value: u8) {
@@ -752,7 +757,7 @@ impl CPU {
   }
 
   pub fn tax(&mut self) {
-    self.x_register.set(self.accumulator.get());
+    self.x_register.set(self.x_register.get());
     self.register_operation(self.x_register.get(), "TAX");
   }
 
@@ -794,6 +799,8 @@ impl CPU {
   fn rol(&mut self, value: u8) -> u8 {
     trace!("ROL called with value: {}", value);
     let (mut result, carry) = value.overflowing_shl(1);
+    // extra cycle for modification
+    self.sync();
     if self.status_register.is_carry_bit_set() {
       result |= 0x1;
     }
@@ -813,30 +820,32 @@ impl CPU {
   pub fn rol_zero_page(&mut self) {
     let (index, value) = self.zero_page("ROL");
     let result = self.rol(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn rol_zero_page_x(&mut self) {
     let (index, value) = self.zp_reg("ROL", self.x_register.get());
     let result = self.rol(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn rol_absolute(&mut self) {
     let (index, value) = self.absolute("ROL");
     let result = self.rol(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   pub fn rol_absolute_x(&mut self) {
     let (index, value) = self.absolute_reg("ROL", self.x_register.get());
     let result = self.rol(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   fn ror(&mut self, value: u8) -> u8 {
     trace!("ROR called with value: {}", value);
     let (mut result, carry) = value.overflowing_shl(1);
+    // extra cycle for modification
+    self.sync();
     if self.status_register.is_carry_bit_set() {
       result |= 0x1;
     }
@@ -856,25 +865,25 @@ impl CPU {
   pub fn ror_zero_page(&mut self) {
     let (index, value) = self.zero_page("ROR");
     let result = self.ror(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn ror_zero_page_x(&mut self) {
     let (index, value) = self.zp_reg("ROR", self.x_register.get());
     let result = self.ror(value);
-    self.memory.set_zero_page(index, result);
+    self.set_zero_page(index, result);
   }
 
   pub fn ror_absolute(&mut self) {
     let (index, value) = self.absolute("ROR");
     let result = self.ror(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   pub fn ror_absolute_x(&mut self) {
     let (index, value) = self.absolute_reg("ROR", self.x_register.get());
     let result = self.ror(value);
-    self.memory.set(index, result);
+    self.set_u16(index, result);
   }
 
   /// Return from interrupt
@@ -883,10 +892,14 @@ impl CPU {
   }
 
   pub fn rts(&mut self) {
-    let lo = self.memory.pop_from_stack();
-    let hi = self.memory.pop_from_stack();
+    let lo = self.pop_from_stack();
+    let hi = self.pop_from_stack();
     let index = u16::from_le_bytes([lo, hi]) + 1;
+    // extra cycle to increment the index
+    self.sync();
     self.program_counter.jump(index);
+    // one byte extra cycle
+    self.sync();
   }
 
   pub fn sbc(&mut self, value: u8) {
@@ -919,7 +932,7 @@ impl CPU {
 
   pub fn sta_zero_page_x(&mut self) {
     let (index, _) = self.zp_reg("STA", self.x_register.get());
-    self.memory.set_zero_page(index, self.accumulator.get());
+    self.set_zero_page(index, self.accumulator.get());
   }
 
   pub fn sta_absolute(&mut self) {
@@ -929,12 +942,12 @@ impl CPU {
 
   pub fn sta_absolute_x(&mut self) {
     let (index, _) = self.absolute_reg("STA", self.x_register.get());
-    self.memory.set(index, self.accumulator.get());
+    self.set_u16(index, self.accumulator.get());
   }
 
   pub fn sta_absolute_y(&mut self) {
     let (index, _) = self.absolute_reg("STA", self.y_register.get());
-    self.memory.set(index, self.accumulator.get());
+    self.set_u16(index, self.accumulator.get());
   }
 
   pub fn sta_indexed_x(&mut self) {
@@ -944,33 +957,46 @@ impl CPU {
 
   pub fn sta_indexed_y(&mut self) {
     let (index, _) = self.indexed_y("STA");
-    self.memory.set(index, self.accumulator.get());
+    self.set_u16(index, self.accumulator.get());
+    self.sync();
   }
 
   pub fn txs(&mut self) {
     self.memory.set_stack_pointer(self.x_register.get());
+    // extra instruction byte always happens
+    self.sync();
   }
 
   pub fn tsx(&mut self) {
     self.x_register.set(self.memory.get_stack_pointer().get());
+    // extra instruction byte always happens
+    self.sync();
   }
 
   pub fn pha(&mut self) {
-    self.memory.push_to_stack(self.accumulator.get());
+    self.push_to_stack(self.accumulator.get());
+    // extra instruction byte always happens
+    self.sync();
   }
 
   pub fn pla(&mut self) {
-    self.accumulator.set(self.memory.pop_from_stack());
+    let stack_value = self.pop_from_stack();
+    self.accumulator.set(stack_value);
+    // extra instruction byte always happens
+    self.sync();
   }
 
   pub fn php(&mut self) {
-    self
-      .memory
-      .push_to_stack(self.status_register.get_register());
+    self.push_to_stack(self.status_register.get_register());
+    // extra instruction byte always happens
+    self.sync();
   }
 
   pub fn plp(&mut self) {
-    self.status_register.set(self.memory.pop_from_stack());
+    let stack = self.pop_from_stack();
+    self.status_register.set(stack);
+    // extra instruction byte always happens
+    self.sync();
   }
 
   pub fn stx_zero_page(&mut self) {
