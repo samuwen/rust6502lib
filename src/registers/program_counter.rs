@@ -25,7 +25,7 @@ impl ProgramCounter {
   }
 
   pub fn increment(&mut self) {
-    self.value.wrapping_add(1);
+    self.value = self.value.wrapping_add(1);
   }
 
   pub fn increase(&mut self, amount: u8) -> bool {

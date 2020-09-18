@@ -20,11 +20,11 @@ impl GeneralRegister {
   }
 
   pub fn increment(&mut self) {
-    self.value.wrapping_add(1);
+    self.value = self.value.wrapping_add(1);
   }
 
   pub fn decrement(&mut self) {
-    self.value.wrapping_sub(1);
+    self.value = self.value.wrapping_sub(1);
   }
 }
 

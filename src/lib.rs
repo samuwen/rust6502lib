@@ -5,14 +5,8 @@ use log::{trace, warn};
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
-use std::time::Duration;
-
-const PROGRAM_MEMORY: u16 = 0x8000;
 
 pub const STARTING_MEMORY_BLOCK: u16 = 0x8000;
-
-// TODO: Memory space is 256 pages of 256 bytes. If a page index (hi byte) is incremented
-// Cycles should be incremented as well per "page boundary crossing"
 
 /// An emulated CPU for the 6502 processor.
 pub struct CPU {
@@ -40,6 +34,9 @@ impl CPU {
       status_register: StatusRegister::new(),
       memory: Memory::new(),
       clock_pin: false,
+      reset_pin: false,
+      irq_pin: false,
+      nmi_pin: false,
     }
   }
 
@@ -167,21 +164,159 @@ impl CPU {
     loop {
       let opcode = self.get_single_operand();
       match opcode {
+        0x00 => self.brk(),
+        0x01 => self.indexed_x_cb("ORA", &mut Self::ora),
+        0x05 => self.zero_page_cb("ORA", &mut Self::ora),
+        0x06 => self.asl_zero_page(),
+        0x08 => self.php(),
+        0x09 => self.immediate_cb("ORA", &mut Self::ora),
+        0x0A => self.asl_accumulator(),
+        0x0D => self.absolute_cb("ORA", &mut Self::ora),
+        0x0E => self.asl_absolute(),
+        0x10 => self.bpl(),
+        0x11 => self.indexed_y_cb("ORA", &mut Self::ora),
+        0x15 => self.zp_reg_cb("ORA", self.x_register.get(), &mut Self::ora),
+        0x16 => self.asl_zero_page_x(),
+        0x18 => self.clc(),
+        0x19 => self.absolute_y_cb("ORA", &mut Self::ora),
+        0x1D => self.absolute_x_cb("ORA", &mut Self::ora),
+        0x1E => self.asl_absolute_x(),
+        0x20 => self.jsr(),
+        0x21 => self.indexed_x_cb("AND", &mut Self::and),
         0x24 => self.zero_page_cb("BIT", &mut Self::bit),
+        0x25 => self.zero_page_cb("AND", &mut Self::and),
+        0x26 => self.rol_zero_page(),
+        0x28 => self.plp(),
         0x29 => self.immediate_cb("AND", &mut Self::and),
+        0x2A => self.rol_accumulator(),
         0x2C => self.absolute_cb("BIT", &mut Self::bit),
+        0x2D => self.absolute_cb("AND", &mut Self::and),
+        0x2E => self.rol_absolute(),
+        0x30 => self.bmi(),
+        0x31 => self.indexed_y_cb("AND", &mut Self::and),
+        0x35 => self.zp_reg_cb("AND", self.x_register.get(), &mut Self::and),
+        0x36 => self.rol_zero_page_x(),
+        0x38 => self.sec(),
+        0x39 => self.absolute_y_cb("AND", &mut Self::and),
+        0x3D => self.absolute_x_cb("AND", &mut Self::and),
+        0x3E => self.rol_absolute_x(),
+        0x40 => self.rti(),
+        0x41 => self.indexed_x_cb("EOR", &mut Self::eor),
+        0x45 => self.zero_page_cb("EOR", &mut Self::eor),
+        0x46 => self.lsr_zero_page(),
+        0x48 => self.pha(),
+        0x49 => self.immediate_cb("EOR", &mut Self::eor),
+        0x4A => self.lsr_accumulator(),
+        0x4C => self.jmp_absolute(),
+        0x4D => self.absolute_cb("EOR", &mut Self::eor),
+        0x4E => self.lsr_absolute(),
+        0x50 => self.bvc(),
+        0x51 => self.indexed_y_cb("EOR", &mut Self::eor),
+        0x55 => self.zp_reg_cb("EOR", self.x_register.get(), &mut Self::eor),
+        0x56 => self.lsr_zero_page_x(),
+        0x58 => self.cli(),
+        0x59 => self.absolute_y_cb("EOR", &mut Self::eor),
+        0x5D => self.absolute_x_cb("EOR", &mut Self::eor),
+        0x5E => self.lsr_absolute_x(),
+        0x60 => self.rts(),
         0x61 => self.indexed_x_cb("ADC", &mut Self::adc),
         0x65 => self.zero_page_cb("ADC", &mut Self::adc),
+        0x66 => self.ror_zero_page(),
+        0x68 => self.pla(),
         0x69 => self.immediate_cb("ADC", &mut Self::adc),
+        0x6A => self.ror_accumulator(),
+        0x6C => self.jmp_indirect(),
         0x6D => self.absolute_cb("ADC", &mut Self::adc),
+        0x6E => self.ror_absolute(),
+        0x70 => self.bvs(),
         0x71 => self.indexed_y_cb("ADC", &mut Self::adc),
         0x75 => self.zp_reg_cb("ADC", self.x_register.get(), &mut Self::adc),
+        0x76 => self.ror_zero_page_x(),
+        0x78 => self.sei(),
         0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
+        0x7E => self.ror_absolute_x(),
+        0x81 => self.sta_indexed_x(),
+        0x84 => self.sty_zero_page(),
+        0x85 => self.sta_zero_page(),
+        0x86 => self.stx_zero_page(),
+        0x88 => self.dey(),
+        0x8A => self.txa(),
+        0x8C => self.sty_absolute(),
+        0x8D => self.sta_absolute(),
+        0x8E => self.stx_absolute(),
+        0x90 => self.bcc(),
+        0x91 => self.sta_indexed_y(),
+        0x94 => self.sty_zero_page_x(),
+        0x95 => self.sta_zero_page_x(),
+        0x96 => self.stx_zero_page_y(),
+        0x98 => self.tya(),
+        0x99 => self.sta_absolute_y(),
+        0x9A => self.txs(),
+        0x9D => self.sta_absolute_x(),
+        0xA0 => self.immediate_cb("LDY", &mut Self::ldy),
+        0xA1 => self.indexed_x_cb("LDA", &mut Self::lda),
+        0xA2 => self.immediate_cb("LDX", &mut Self::ldx),
+        0xA4 => self.zero_page_cb("LDY", &mut Self::ldx),
+        0xA5 => self.zero_page_cb("LDA", &mut Self::lda),
+        0xA6 => self.zero_page_cb("LDX", &mut Self::ldx),
+        0xA8 => self.tay(),
+        0xA9 => self.immediate_cb("LDA", &mut Self::lda),
+        0xAA => self.tax(),
+        0xAC => self.absolute_cb("LDY", &mut Self::ldy),
+        0xAD => self.absolute_cb("LDA", &mut Self::lda),
+        0xAE => self.absolute_cb("LDX", &mut Self::ldx),
+        0xB0 => self.bcs(),
+        0xB1 => self.indexed_y_cb("LDA", &mut Self::lda),
+        0xB8 => self.clv(),
+        0xB4 => self.zp_reg_cb("LDY", self.x_register.get(), &mut Self::ldy),
+        0xB5 => self.zp_reg_cb("LDA", self.x_register.get(), &mut Self::lda),
+        0xB6 => self.zp_reg_cb("LDX", self.y_register.get(), &mut Self::ldx),
+        0xB9 => self.absolute_y_cb("LDA", &mut Self::lda),
+        0xBA => self.tsx(),
+        0xBC => self.absolute_x_cb("LDY", &mut Self::ldy),
+        0xBD => self.absolute_x_cb("LDA", &mut Self::lda),
+        0xBE => self.absolute_y_cb("LDX", &mut Self::ldx),
+        0xC0 => self.immediate_cb("CPY", &mut Self::cpy),
+        0xC1 => self.indexed_x_cb("CMP", &mut Self::cmp),
+        0xC4 => self.zero_page_cb("CPY", &mut Self::cpy),
+        0xC5 => self.zero_page_cb("CMP", &mut Self::cmp),
+        0xC6 => self.dec_zp(),
+        0xC8 => self.iny(),
+        0xC9 => self.immediate_cb("CMP", &mut Self::cmp),
+        0xCA => self.dex(),
+        0xCC => self.absolute_cb("CPY", &mut Self::cpy),
+        0xCD => self.absolute_cb("CMP", &mut Self::cmp),
+        0xCE => self.dec_abs(),
+        0xD0 => self.bne(),
+        0xD1 => self.indexed_y_cb("CMP", &mut Self::cmp),
+        0xD5 => self.zp_reg_cb("CMP", self.x_register.get(), &mut Self::cmp),
+        0xD6 => self.dec_zp_reg(),
+        0xD8 => self.cld(),
+        0xD9 => self.absolute_y_cb("CMP", &mut Self::cmp),
+        0xDD => self.absolute_x_cb("CMP", &mut Self::cmp),
+        0xDE => self.dec_abs_x(),
+        0xE0 => self.immediate_cb("CPX", &mut Self::cpx),
+        0xE1 => self.indexed_x_cb("SBC", &mut Self::sbc),
+        0xE4 => self.zero_page_cb("CPX", &mut Self::cpx),
+        0xE5 => self.zero_page_cb("SBC", &mut Self::sbc),
+        0xE6 => self.inc_zp(),
+        0xE8 => self.inx(),
+        0xE9 => self.immediate_cb("SBC", &mut Self::sbc),
+        0xEA => self.nop(),
+        0xEC => self.absolute_cb("CPX", &mut Self::cpx),
+        0xED => self.absolute_cb("SBC", &mut Self::sbc),
+        0xEE => self.inc_abs(),
+        0xF0 => self.beq(),
+        0xF1 => self.indexed_y_cb("SBC", &mut Self::sbc),
+        0xF5 => self.zp_reg_cb("SBC", self.x_register.get(), &mut Self::sbc),
+        0xF6 => self.inc_zp_reg(),
+        0xF8 => self.sed(),
+        0xF9 => self.absolute_y_cb("SBC", &mut Self::sbc),
+        0xFD => self.absolute_x_cb("SBC", &mut Self::sbc),
+        0xFE => self.inc_abs_x(),
         _ => (),
       }
-      std::thread::sleep(Duration::from_micros(1790 * self.cycle_counter as u64));
-      self.cycle_counter = 0;
     }
   }
 
@@ -290,7 +425,6 @@ impl CPU {
   fn indexed_y_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.indexed_y(name);
     cb(self, value);
-    self.cycle_counter += 5;
   }
 
   fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
@@ -1022,7 +1156,7 @@ impl CPU {
     self.memory.set_zero_page(index, self.y_register.get());
   }
 
-  pub fn sty_zero_page_y(&mut self) {
+  pub fn sty_zero_page_x(&mut self) {
     let (index, _) = self.zp_reg("STY", self.x_register.get());
     self.memory.set_zero_page(index, self.y_register.get());
   }
