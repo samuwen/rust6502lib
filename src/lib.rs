@@ -171,6 +171,7 @@ impl CPU {
         0x08 => self.php(),
         0x09 => self.immediate_cb("ORA", &mut Self::ora),
         0x0A => self.asl_accumulator(),
+        0x0B => self.immediate_cb("AAC", &mut Self::aac),
         0x0D => self.absolute_cb("ORA", &mut Self::ora),
         0x0E => self.asl_absolute(),
         0x10 => self.bpl(),
@@ -189,6 +190,7 @@ impl CPU {
         0x28 => self.plp(),
         0x29 => self.immediate_cb("AND", &mut Self::and),
         0x2A => self.rol_accumulator(),
+        0x2B => self.immediate_cb("AAC", &mut Self::aac),
         0x2C => self.absolute_cb("BIT", &mut Self::bit),
         0x2D => self.absolute_cb("AND", &mut Self::and),
         0x2E => self.rol_absolute(),
@@ -326,10 +328,10 @@ impl CPU {
   ============================================================================================
   */
 
+  /// Immediate addressing mode. Costs one cycle.
   fn immediate(&mut self, name: &str) -> u8 {
     let op = self.get_single_operand();
     trace!("{} immediate called with operand:0x{:X}", name, op);
-    self.sync();
     op
   }
 
@@ -338,10 +340,18 @@ impl CPU {
     cb(self, op);
   }
 
+  /// Zero page addressing mode. Costs two cycles.
   fn zero_page(&mut self, name: &str) -> (u8, u8) {
     let index = self.get_single_operand();
     trace!("{} zero page called with index: 0x{:X}", name, index);
     (index, self.get_zero_page(index))
+  }
+
+  /// Zero page addressing mode. Costs one cycle
+  fn zero_page_index(&mut self, name: &str) -> u8 {
+    let index = self.get_single_operand();
+    trace!("{} zero page called with index: 0x{:X}", name, index);
+    index
   }
 
   fn zero_page_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
@@ -349,6 +359,7 @@ impl CPU {
     cb(self, value);
   }
 
+  /// Zero page x or y addressing mode. Costs 3 cycles.
   fn zp_reg(&mut self, name: &str, reg_val: u8) -> (u8, u8) {
     let op = self.get_single_operand();
     trace!("{} zero page x called with operand: 0x{:X}", name, op);
@@ -358,11 +369,21 @@ impl CPU {
     (index, self.get_zero_page(index))
   }
 
+  /// Zero page x or y addressing mode. Costs 2 cycles.
+  fn zp_reg_index(&mut self, name: &str, reg_val: u8) -> u8 {
+    let op = self.get_single_operand();
+    trace!("{} zero page x called with operand: 0x{:X}", name, op);
+    // waste a cycle
+    self.get_zero_page(op);
+    op.wrapping_add(reg_val)
+  }
+
   fn zp_reg_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, reg_val: u8, cb: &mut F) {
     let (_, value) = self.zp_reg(name, reg_val);
     cb(self, value);
   }
 
+  /// Absolute addressing mode. Costs 3 cycles.
   fn absolute(&mut self, name: &str) -> (u16, u8) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
@@ -370,11 +391,21 @@ impl CPU {
     (index, self.get_u16(index))
   }
 
+  /// Absolute addressing mode. Costs 2 cycles
+  fn absolute_index(&mut self, name: &str) -> u16 {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
+    trace!("{} absolute called with index: 0x{:X}", name, index);
+    index
+  }
+
   fn absolute_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.absolute(name);
     cb(self, value);
   }
 
+  /// Absolute x or y addressing mode. Costs at least 3 cycles. Can add a cycle
+  /// if a page boundary is crossed.
   fn absolute_reg(&mut self, name: &str, reg: u8) -> (u16, u8) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
@@ -394,7 +425,7 @@ impl CPU {
     cb(self, value);
   }
 
-  /// AKA Indexed indirect AKA pre-indexed
+  /// AKA Indexed indirect AKA pre-indexed. Costs 4 cycles
   fn indexed_x(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     trace!("{} indexed x called with operand: 0x{:X}", name, op);
@@ -410,7 +441,7 @@ impl CPU {
     cb(self, value);
   }
 
-  /// AKA Indirect indexed AKA post-indexed
+  /// AKA Indirect indexed AKA post-indexed. Costs 4 cycles
   fn indexed_y(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     trace!("{} indexed y called with operand: 0x{:X}", name, op);
@@ -528,6 +559,53 @@ impl CPU {
                                   Opcodes
   ============================================================================================
   */
+
+  /// Illegal opcode. Two opcode values reference this, both are immediate mode.
+  ///
+  /// Affects flags N Z C. Carry is set if result is negative
+  pub fn aac(&mut self, value: u8) {
+    let message = "AAC";
+    warn!("{} called. Something might be borked.", message);
+    let result = value & self.accumulator.get();
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+    self
+      .status_register
+      .handle_c_flag(message, self.status_register.is_negative_bit_set());
+  }
+
+  /// Illegal opcode. And x register with accumulator and store result in memory.
+  /// Four possible codes, zero page, zero page y, indirect x, and absolute
+  ///
+  /// Affects flags N, Z
+  pub fn aax(&mut self, index: u16) {
+    let message = "AAX";
+    warn!("{} called. Something might be borked.", message);
+    let result = self.x_register.get() & self.accumulator.get();
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+    self.set_u16(index, result);
+  }
+
+  pub fn aax_zero_page(&mut self) {
+    let index = self.zero_page_index("AAX");
+    self.aax(index as u16);
+  }
+
+  pub fn aax_zero_page_y(&mut self) {
+    let index = self.zp_reg_index("AAX", self.y_register.get());
+    self.aax(index as u16);
+  }
+
+  pub fn aax_indirect_x(&mut self) {
+    let (index, _) = self.indexed_x("AAX");
+    self.aax(index);
+  }
+
+  pub fn aax_absolute(&mut self) {
+    let index = self.absolute_index("AAX");
+    self.aax(index);
+  }
 
   /// Adds the value given to the accumulator
   ///
@@ -699,8 +777,7 @@ impl CPU {
     self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
   }
 
-  pub fn dec(&mut self, index: u16) {
-    let value = self.get_u16(index);
+  pub fn dec(&mut self, index: u16, value: u8) {
     let value = value.wrapping_sub(1);
     // extra cycle for modification
     self.sync();
@@ -711,23 +788,25 @@ impl CPU {
   }
 
   pub fn dec_zp(&mut self) {
-    let (index, _) = self.zero_page("DEC");
-    self.dec(index as u16);
+    let (index, value) = self.zero_page("DEC");
+    self.dec(index as u16, value);
   }
 
   pub fn dec_zp_reg(&mut self) {
-    let (index, _) = self.zp_reg("DEC", self.x_register.get());
-    self.dec(index as u16);
+    let (index, value) = self.zp_reg("DEC", self.x_register.get());
+    self.dec(index as u16, value);
   }
 
   pub fn dec_abs(&mut self) {
-    let (index, _) = self.absolute("DEC");
-    self.dec(index as u16);
+    let (index, value) = self.absolute("DEC");
+    self.dec(index as u16, value);
   }
 
   pub fn dec_abs_x(&mut self) {
-    let (index, _) = self.absolute_reg("DEC", self.x_register.get());
-    self.dec(index as u16);
+    let (index, value) = self.absolute_reg("DEC", self.x_register.get());
+    self.dec(index as u16, value);
+    // extra cycle. do not know why
+    self.sync();
   }
 
   /// DEDICATED TO XOR - GOD OF INVERSE
@@ -740,8 +819,7 @@ impl CPU {
     self.status_register.handle_z_flag(result, message);
   }
 
-  pub fn inc(&mut self, index: u16) {
-    let value = self.memory.get_u16(index);
+  pub fn inc(&mut self, index: u16, value: u8) {
     let value = value.wrapping_add(1);
     // extra cycle for modification
     self.sync();
@@ -752,23 +830,25 @@ impl CPU {
   }
 
   pub fn inc_zp(&mut self) {
-    let (index, _) = self.zero_page("INC");
-    self.inc(index as u16);
+    let (index, value) = self.zero_page("INC");
+    self.inc(index as u16, value);
   }
 
   pub fn inc_zp_reg(&mut self) {
-    let (index, _) = self.zp_reg("INC", self.x_register.get());
-    self.inc(index as u16);
+    let (index, value) = self.zp_reg("INC", self.x_register.get());
+    self.inc(index as u16, value);
   }
 
   pub fn inc_abs(&mut self) {
-    let (index, _) = self.absolute("INC");
-    self.inc(index as u16);
+    let (index, value) = self.absolute("INC");
+    self.inc(index as u16, value);
   }
 
   pub fn inc_abs_x(&mut self) {
-    let (index, _) = self.absolute_reg("INC", self.x_register.get());
-    self.inc(index as u16);
+    let (index, value) = self.absolute_reg("INC", self.x_register.get());
+    self.inc(index as u16, value);
+    // extra cycle. do not know why
+    self.sync();
   }
 
   pub fn jmp_absolute(&mut self) {
@@ -1063,18 +1143,18 @@ impl CPU {
   }
 
   pub fn sta_zero_page(&mut self) {
-    let (index, _) = self.zero_page("STA");
-    self.memory.set_zero_page(index, self.accumulator.get());
+    let index = self.zero_page_index("STA");
+    self.set_zero_page(index, self.accumulator.get());
   }
 
   pub fn sta_zero_page_x(&mut self) {
-    let (index, _) = self.zp_reg("STA", self.x_register.get());
+    let index = self.zp_reg_index("STA", self.x_register.get());
     self.set_zero_page(index, self.accumulator.get());
   }
 
   pub fn sta_absolute(&mut self) {
-    let (index, _) = self.absolute("STA");
-    self.memory.set(index, self.accumulator.get());
+    let index = self.absolute_index("STA");
+    self.set_u16(index, self.accumulator.get());
   }
 
   pub fn sta_absolute_x(&mut self) {
@@ -1089,13 +1169,12 @@ impl CPU {
 
   pub fn sta_indexed_x(&mut self) {
     let (index, _) = self.indexed_x("STA");
-    self.memory.set(index, self.accumulator.get());
+    self.set_u16(index, self.accumulator.get());
   }
 
   pub fn sta_indexed_y(&mut self) {
     let (index, _) = self.indexed_y("STA");
     self.set_u16(index, self.accumulator.get());
-    self.sync();
   }
 
   pub fn txs(&mut self) {
@@ -1137,32 +1216,32 @@ impl CPU {
   }
 
   pub fn stx_zero_page(&mut self) {
-    let (index, _) = self.zero_page("STX");
+    let index = self.zero_page_index("STX");
     self.memory.set_zero_page(index, self.x_register.get());
   }
 
   pub fn stx_zero_page_y(&mut self) {
-    let (index, _) = self.zp_reg("STX", self.y_register.get());
+    let index = self.zp_reg_index("STX", self.y_register.get());
     self.memory.set_zero_page(index, self.x_register.get());
   }
 
   pub fn stx_absolute(&mut self) {
-    let (index, _) = self.absolute("STX");
+    let index = self.absolute_index("STX");
     self.memory.set(index, self.x_register.get());
   }
 
   pub fn sty_zero_page(&mut self) {
-    let (index, _) = self.zero_page("STY");
+    let index = self.zero_page_index("STY");
     self.memory.set_zero_page(index, self.y_register.get());
   }
 
   pub fn sty_zero_page_x(&mut self) {
-    let (index, _) = self.zp_reg("STY", self.x_register.get());
+    let index = self.zp_reg_index("STY", self.x_register.get());
     self.memory.set_zero_page(index, self.y_register.get());
   }
 
   pub fn sty_absolute(&mut self) {
-    let (index, _) = self.absolute("STY");
+    let index = self.absolute_index("STY");
     self.memory.set(index, self.y_register.get());
   }
 }
