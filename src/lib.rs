@@ -1,7 +1,7 @@
 mod memory;
 mod registers;
 
-use log::trace;
+use log::{trace, warn};
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
@@ -9,16 +9,23 @@ use std::time::Duration;
 
 const PROGRAM_MEMORY: u16 = 0x8000;
 
+pub const STARTING_MEMORY_BLOCK: u16 = 0x8000;
+
+// TODO: Memory space is 256 pages of 256 bytes. If a page index (hi byte) is incremented
+// Cycles should be incremented as well per "page boundary crossing"
+
 /// An emulated CPU for the 6502 processor.
 pub struct CPU {
   program_counter: ProgramCounter,
-  stack_pointer: StackPointer,
   accumulator: GeneralRegister,
   x_register: GeneralRegister,
   y_register: GeneralRegister,
   status_register: StatusRegister,
   memory: Memory,
-  cycle_counter: u8,
+  reset_pin: bool,
+  nmi_pin: bool,
+  irq_pin: bool,
+  clock_pin: bool,
 }
 
 impl CPU {
@@ -27,56 +34,150 @@ impl CPU {
     trace!("Initializing CPU");
     CPU {
       program_counter: ProgramCounter::new(),
-      stack_pointer: StackPointer::new(),
       accumulator: GeneralRegister::new(),
       x_register: GeneralRegister::new(),
       y_register: GeneralRegister::new(),
       status_register: StatusRegister::new(),
       memory: Memory::new(),
-      cycle_counter: 0,
+      clock_pin: false,
     }
   }
 
-  /// Resets the CPU to its initial state. Zeroes everything out basically.
   pub fn reset(&mut self) {
     self.program_counter.reset();
-    self.stack_pointer.reset();
     self.accumulator.reset();
     self.x_register.reset();
     self.y_register.reset();
     self.status_register.reset();
     self.memory.reset();
-    self.cycle_counter = 0;
+    self.reset_pin = false;
+    self.irq_pin = false;
+    self.nmi_pin = false;
+    self.clock_pin = false;
     trace!("CPU Reset")
   }
 
-  /// Loads the program into the ROM memory starting at 0x8000 (just a default, we can change this later)
-  /// Sets the program counter to start at the initial location of the memory.
-  fn load_program_into_memory(&mut self, program: Vec<u8>) {
-    let mut mem_index = PROGRAM_MEMORY;
-    for value in program.iter() {
-      self.memory.set(mem_index, *value);
-      mem_index += 1;
+  fn load_program_into_memory(&mut self, program: &Vec<u8>) {
+    let mut memory_address = STARTING_MEMORY_BLOCK;
+    for byte in program.iter() {
+      self.memory.set(memory_address, *byte);
+      memory_address += 1;
     }
-    self.program_counter.set(mem_index);
+  }
+
+  /// Waits for a timing signal to be available at the clock pin.
+  fn sync(&mut self) {
+    while !self.clock_pin {
+      self.check_pins();
+    }
+    self.clock_pin = false;
+  }
+
+  /// Simulates signal to the clock pin, enabling the next cycle to execute.
+  pub fn tick(&mut self) {
+    self.clock_pin = true;
+  }
+
+  pub fn set_reset(&mut self) {
+    self.reset_pin = true;
+  }
+
+  pub fn set_nmi(&mut self) {
+    self.nmi_pin = true;
+  }
+
+  pub fn set_irq(&mut self) {
+    self.irq_pin = true;
+  }
+
+  fn check_pins(&mut self) {
+    if self.reset_pin {
+      self.reset_interrupt();
+    }
+    if self.nmi_pin {
+      self.nmi_interrupt();
+    }
+    if self.irq_pin && !self.status_register.is_break_bit_set() {
+      self.irq_interrupt();
+    }
+  }
+
+  fn push_to_stack(&mut self, value: u8) {
+    self.memory.push_to_stack(value);
+    // writing to memory
+    self.sync();
+  }
+
+  fn pop_from_stack(&mut self) -> u8 {
+    // incrementing the pointer
+    self.sync();
+    let val = self.memory.pop_from_stack();
+    // reading from memory
+    self.sync();
+    val
+  }
+
+  fn get_u16(&mut self, index: u16) -> u8 {
+    let val = self.memory.get_u16(index);
+    self.sync();
+    val
+  }
+
+  fn set_u16(&mut self, index: u16, value: u8) {
+    self.memory.set(index, value);
+    self.sync();
+  }
+
+  fn get_zero_page(&mut self, index: u8) -> u8 {
+    let val = self.memory.get_zero_page(index);
+    self.sync();
+    val
+  }
+
+  fn set_zero_page(&mut self, index: u8, value: u8) {
+    self.memory.set_zero_page(index, value);
+    self.sync();
+  }
+
+  fn get_single_operand(&mut self) -> u8 {
+    let op = self.memory.get_u16(self.program_counter.get_and_increase());
+    self.sync();
+    op
+  }
+
+  fn get_two_operands(&mut self) -> [u8; 2] {
+    let lo = self.memory.get_u16(self.program_counter.get_and_increase());
+    self.sync();
+    let hi = self.memory.get_u16(self.program_counter.get_and_increase());
+    self.sync();
+    [lo, hi]
+  }
+
+  fn test_for_overflow(&mut self, op1: u8, op2: u8) {
+    let (_, overflow) = op1.overflowing_add(op2);
+    if overflow {
+      self.sync();
+    }
   }
 
   /// Runs a program while there are opcodes to handle. This will change when we actually have
   /// a real data set to operate against.
   pub fn run(&mut self, program: Vec<u8>) {
-    self.load_program_into_memory(program);
-    while self.program_counter.get() < 200 {
-      let opcode = self.memory.get(self.program_counter.get_next());
+    self.load_program_into_memory(&program);
+    loop {
+      let opcode = self.get_single_operand();
       match opcode {
-        0x65 => self.adc_zero_page(),
-        0x69 => {
-          let operand = self.program_counter.get_next();
-          self.adc(self.memory.get(operand))
-        }
-        0xA9 => {
-          let operand = self.program_counter.get_next();
-          self.lda(self.memory.get(operand))
-        }
+        0x24 => self.zero_page_cb("BIT", &mut Self::bit),
+        0x29 => self.immediate_cb("AND", &mut Self::and),
+        0x2C => self.absolute_cb("BIT", &mut Self::bit),
+        0x61 => self.indexed_x_cb("ADC", &mut Self::adc),
+        0x65 => self.zero_page_cb("ADC", &mut Self::adc),
+        0x69 => self.immediate_cb("ADC", &mut Self::adc),
+        0x6D => self.absolute_cb("ADC", &mut Self::adc),
+        0x71 => self.indexed_y_cb("ADC", &mut Self::adc),
+        0x75 => self.zp_reg_cb("ADC", self.x_register.get(), &mut Self::adc),
+        0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
+        0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         _ => (),
       }
       std::thread::sleep(Duration::from_micros(1790 * self.cycle_counter as u64));
@@ -90,78 +191,104 @@ impl CPU {
   ============================================================================================
   */
 
-  fn get_zp_index(&mut self) -> u8 {
-    let op = self.program_counter.get_next();
-    self.memory.get(op)
+  fn immediate(&mut self, name: &str) -> u8 {
+    let op = self.get_single_operand();
+    trace!("{} immediate called with operand:0x{:X}", name, op);
+    self.sync();
+    op
   }
 
-  fn get_abs_index(&mut self) -> u16 {
-    let msb = self.memory.get(self.program_counter.get_next());
-    let lsb = self.memory.get(self.program_counter.get_next());
-    self.memory.get_u16_index(msb, lsb)
+  fn immediate_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let op = self.immediate(name);
+    cb(self, op);
   }
 
-  /// Generically handles zero page retrieval operations and calls a callback when complete
-  fn generic_zero_page<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let index = self.get_zp_index();
+  fn zero_page(&mut self, name: &str) -> (u8, u8) {
+    let index = self.get_single_operand();
     trace!("{} zero page called with index: 0x{:X}", name, index);
-    cb(self, self.memory.get_zero_page(index));
-    self.cycle_counter += 1;
+    (index, self.get_zero_page(index))
   }
 
-  /// Gets a value in zp memory, adds it to x register, takes whatever valeu comes back and uses that
-  /// as a zero page index with a value
-  fn generic_zero_page_x<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let op = self.get_zp_index();
+  fn zero_page_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let (_, value) = self.zero_page(name);
+    cb(self, value);
+  }
+
+  fn zp_reg(&mut self, name: &str, reg_val: u8) -> (u8, u8) {
+    let op = self.get_single_operand();
     trace!("{} zero page x called with operand: 0x{:X}", name, op);
-    let index = op.wrapping_add(self.x_register.get());
-    cb(self, self.memory.get_zero_page(index));
-    self.cycle_counter += 2;
+    // waste a cycle
+    self.get_zero_page(op);
+    let index = op.wrapping_add(reg_val);
+    (index, self.get_zero_page(index))
   }
 
-  fn generic_zero_page_y<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let op = self.get_zp_index();
-    trace!("{} zero page y called with operand: 0x{:X}", name, op);
-    let index = op.wrapping_add(self.y_register.get());
-    cb(self, self.memory.get_zero_page(index));
-    self.cycle_counter += 2;
+  fn zp_reg_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, reg_val: u8, cb: &mut F) {
+    let (_, value) = self.zp_reg(name, reg_val);
+    cb(self, value);
   }
 
-  fn generic_absolute<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let index = self.get_abs_index();
+  fn absolute(&mut self, name: &str) -> (u16, u8) {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
     trace!("{} absolute called with index: 0x{:X}", name, index);
-    cb(self, self.memory.get_u16(index));
-    self.cycle_counter += 2;
+    (index, self.get_u16(index))
   }
 
-  fn generic_abs_x<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let index = self.get_abs_index() + self.x_register.get() as u16;
-    trace!("{} absolute x called with index: 0x{:X}", name, index);
-    cb(self, self.memory.get_u16(index));
-    self.cycle_counter += 2;
+  fn absolute_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let (_, value) = self.absolute(name);
+    cb(self, value);
   }
 
-  fn generic_abs_y<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let index = self.get_abs_index() + self.y_register.get() as u16;
-    trace!("{} absolute y called with index: 0x{:X}", name, index);
-    cb(self, self.memory.get_u16(index));
-    self.cycle_counter += 2;
+  fn absolute_reg(&mut self, name: &str, reg: u8) -> (u16, u8) {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
+    trace!("{} absolute reg called with index: 0x{:X}", name, index);
+    let total = index.wrapping_add(reg as u16);
+    self.test_for_overflow(ops[1], reg);
+    (index, self.get_u16(total))
+  }
+
+  fn absolute_x_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let (_, value) = self.absolute_reg(name, self.x_register.get());
+    cb(self, value);
+  }
+
+  fn absolute_y_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let (_, value) = self.absolute_reg(name, self.y_register.get());
+    cb(self, value);
   }
 
   /// AKA Indexed indirect AKA pre-indexed
-  fn generic_indexed_x<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let result = self.get_zp_index();
-    let op = result.wrapping_add(self.x_register.get());
+  fn indexed_x(&mut self, name: &str) -> (u16, u8) {
+    let op = self.get_single_operand();
     trace!("{} indexed x called with operand: 0x{:X}", name, op);
-    cb(self, self.memory.get_pre_indexed_data(op));
-    self.cycle_counter += 4;
+    let modified_op = op.wrapping_add(self.x_register.get());
+    let lo = self.get_zero_page(modified_op);
+    let hi = self.get_zero_page(modified_op.wrapping_add(1));
+    let index = u16::from_le_bytes([lo, hi]);
+    (index, self.get_u16(index))
+  }
+
+  fn indexed_x_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let (_, value) = self.indexed_x(name);
+    cb(self, value);
   }
 
   /// AKA Indirect indexed AKA post-indexed
-  fn generic_indexed_y<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
-    let op = self.get_zp_index();
+  fn indexed_y(&mut self, name: &str) -> (u16, u8) {
+    let op = self.get_single_operand();
     trace!("{} indexed y called with operand: 0x{:X}", name, op);
-    let value = self.memory.get_post_indexed_data(op, self.y_register.get());
+    let y_val = self.y_register.get();
+    let lo = self.get_zero_page(op);
+    let hi = self.get_zero_page(op.wrapping_add(1));
+    let index = u16::from_le_bytes([lo, hi]);
+    self.test_for_overflow(hi, y_val);
+    (index, self.memory.get_u16(index))
+  }
+
+  fn indexed_y_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
+    let (_, value) = self.indexed_y(name);
     cb(self, value);
     self.cycle_counter += 5;
   }
@@ -169,7 +296,97 @@ impl CPU {
   fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
     trace!("{} called", name);
     cb(&mut self.status_register);
-    self.cycle_counter += 2;
+    // One byte op, all instructions require 2 cycles min.
+    self.sync();
+  }
+
+  fn branch(&mut self, condition: bool, op: u8) {
+    if condition {
+      let overflow;
+      if op > 0x7F {
+        overflow = self.program_counter.decrease(!op + 1);
+      } else {
+        overflow = self.program_counter.increase(op);
+      }
+      if overflow {
+        // Page overflow costs a cycle
+        self.sync();
+      }
+      // Branch taken costs a cycle
+      self.sync();
+    }
+  }
+
+  fn generic_compare(&mut self, test_value: u8, reg_value: u8) {
+    let (result, carry) = reg_value.overflowing_sub(test_value);
+    if result == 0 {
+      self.status_register.set_zero_bit();
+    }
+    if !carry {
+      self.status_register.set_carry_bit();
+    }
+    if (result & 0x80) > 0 {
+      self.status_register.set_negative_bit();
+    }
+  }
+
+  fn register_operation(&mut self, value: u8, message: &str) {
+    trace!("{} called with value: {}", message, value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
+    // One byte instruction. All instruction require minimum two bytes.
+    self.sync();
+  }
+
+  /*
+  ============================================================================================
+                                  Interrupts
+  ============================================================================================
+  */
+
+  fn interrupt(&mut self, low_vec: u16, hi_vec: u16) -> u16 {
+    self.internal_operations();
+    let ops = self.program_counter.to_le_bytes();
+    self.push_to_stack(ops[0]);
+    self.push_to_stack(ops[1]);
+    self.push_to_stack(self.status_register.get_register());
+    let lo = self.get_u16(low_vec);
+    let hi = self.get_u16(hi_vec);
+    u16::from_le_bytes([lo, hi])
+  }
+
+  fn return_from_interrupt(&mut self) {
+    let status_reg = self.pop_from_stack();
+    self.status_register.set(status_reg);
+    let hi_pc = self.pop_from_stack();
+    let lo_pc = self.pop_from_stack();
+    self
+      .program_counter
+      .jump(u16::from_le_bytes([lo_pc, hi_pc]));
+  }
+
+  /// Unspecified thing that delays execution by two cycles.
+  fn internal_operations(&mut self) {
+    self.sync();
+    self.sync();
+  }
+
+  /// Resets the system. Some data will be left over after depending on where
+  /// the program was in the execution cycle
+  fn reset_interrupt(&mut self) {
+    let index = self.interrupt(0xFFFC, 0xFFFD);
+    self.program_counter.jump(index);
+    self.reset();
+  }
+
+  fn nmi_interrupt(&mut self) {
+    let index = self.interrupt(0xFFFA, 0xFFFB);
+    self.program_counter.jump(index);
+  }
+
+  fn irq_interrupt(&mut self) {
+    let index = self.interrupt(0xFFFE, 0xFFFF);
+    self.program_counter.jump(index);
   }
 
   /*
@@ -197,39 +414,6 @@ impl CPU {
     self.status_register.handle_v_flag(result, message, carry);
     self.status_register.handle_z_flag(result, message);
     self.status_register.handle_c_flag(message, carry);
-    self.cycle_counter += 2;
-  }
-
-  /// Retrieves the value at zero page memory at index provided by the operand and adds it to the accumulator.
-  pub fn adc_zero_page(&mut self) {
-    self.generic_zero_page("ADC", &mut CPU::adc);
-  }
-
-  /// Adds the value of the x register to the operand and uses the resulting index to retrieve a value
-  /// from zero page memory. Then adds this value to the accumulator.
-  pub fn adc_zero_page_x(&mut self) {
-    self.generic_zero_page_x("ADC", &mut CPU::adc);
-  }
-
-  /// Retrieves the value at regular memory index and adds it to the accumulator.
-  pub fn adc_absolute(&mut self) {
-    self.generic_absolute("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_absolute_x(&mut self) {
-    self.generic_abs_x("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_absolute_y(&mut self) {
-    self.generic_abs_y("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_indexed_x(&mut self) {
-    self.generic_indexed_x("ADC", &mut CPU::adc);
-  }
-
-  pub fn adc_indexed_y(&mut self) {
-    self.generic_indexed_y("ADC", &mut CPU::adc);
   }
 
   /// Bitwise and operation performed against the accumulator
@@ -242,46 +426,20 @@ impl CPU {
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
-    self.program_counter.advance(2);
-  }
-
-  pub fn and_zero_page(&mut self) {
-    self.generic_zero_page("AND", &mut CPU::and);
-  }
-
-  pub fn and_zero_page_x(&mut self) {
-    self.generic_zero_page_x("AND", &mut CPU::and);
-  }
-
-  pub fn and_absolute(&mut self) {
-    self.generic_absolute("AND", &mut CPU::and);
-  }
-
-  pub fn and_absolute_x(&mut self) {
-    self.generic_abs_x("AND", &mut CPU::and);
-  }
-
-  pub fn and_absolute_y(&mut self) {
-    self.generic_abs_y("AND", &mut CPU::and);
-  }
-
-  pub fn and_indexed_x(&mut self) {
-    self.generic_indexed_x("AND", &mut CPU::and);
-  }
-
-  pub fn and_indexed_y(&mut self) {
-    self.generic_indexed_y("AND", &mut CPU::and);
   }
 
   /// Shifts all bits left one position for the applied location
   ///
   /// Affects flags N Z C
   fn asl(&mut self, value: u8) -> u8 {
+    let message = "ASL";
+    trace!("{} called with value: 0x{:X}", message, value);
     let (result, carry) = value.overflowing_shl(1);
-    self.status_register.handle_n_flag(result, "ASL");
-    self.status_register.handle_z_flag(result, "ASL");
-    self.status_register.handle_c_flag("ASL", carry);
-    self.cycle_counter += 2;
+    // extra cycle for modification
+    self.sync();
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_c_flag(message, carry);
     result
   }
 
@@ -292,44 +450,34 @@ impl CPU {
   }
 
   pub fn asl_zero_page(&mut self) {
-    let index = self.get_zp_index();
-    trace!("ASL zero page called with index: 0x{:X}", index);
-    let value = self.memory.get_zero_page(index);
+    let (index, value) = self.zero_page("ASL");
     let result = self.asl(value);
-    self.memory.set_zero_page(index, result);
-    self.cycle_counter += 3;
+    self.set_zero_page(index, result);
   }
 
   pub fn asl_zero_page_x(&mut self) {
-    let index = self.get_zp_index().wrapping_add(self.x_register.get());
-    trace!("ASL zero page called with index: 0x{:X}", index);
-    let value = self.memory.get_zero_page(index);
+    let (index, value) = self.zp_reg("ASL", self.x_register.get());
     let result = self.asl(value);
-    self.memory.set_zero_page(index, result);
-    self.cycle_counter += 4;
+    self.set_zero_page(index, result);
   }
 
   pub fn asl_absolute(&mut self) {
-    let index = self.get_abs_index();
-    trace!("ASL absolute called with index: 0x{:X}", index);
-    let value = self.memory.get_u16(index);
+    let (index, value) = self.absolute("ASL");
     let result = self.asl(value);
-    self.memory.set(index, result);
-    self.cycle_counter += 4;
+    self.set_u16(index, result);
   }
 
   pub fn asl_absolute_x(&mut self) {
-    let index = self.get_abs_index() + self.x_register.get() as u16;
-    trace!("ASL absolute x called with index: 0x{:X}", index);
-    let value = self.memory.get_u16(index);
+    let (index, value) = self.absolute_reg("ASL", self.x_register.get());
     let result = self.asl(value);
-    self.memory.set(index, result);
-    self.cycle_counter += 5;
+    self.set_u16(index, result);
+    // extra cycle. do not know from where
+    self.sync();
   }
 
   /// Tests a value and sets flags accordingly.
   ///
-  /// Zero is set by looking at the result of the value AND with the accumulator.
+  /// Zero is set by looking at the result of the value AND the accumulator.
   /// N & V are set by bits 7 & 6 of the value respectively.
   ///
   /// Affects flags N V Z
@@ -344,16 +492,61 @@ impl CPU {
     }
   }
 
-  pub fn bit_zero_page(&mut self) {
-    let index = self.get_zp_index();
-    self.bit(self.memory.get_zero_page(index));
-    self.cycle_counter += 3;
+  pub fn bpl(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(!self.status_register.is_negative_bit_set(), op);
   }
 
-  pub fn bit_absolute(&mut self) {
-    let index = self.get_abs_index();
-    self.bit(self.memory.get_u16(index));
-    self.cycle_counter += 4;
+  pub fn bmi(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(self.status_register.is_negative_bit_set(), op);
+  }
+
+  pub fn bvc(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(!self.status_register.is_overflow_bit_set(), op);
+  }
+
+  pub fn bvs(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(self.status_register.is_overflow_bit_set(), op);
+  }
+
+  pub fn bcc(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(!self.status_register.is_carry_bit_set(), op);
+  }
+
+  pub fn bcs(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(self.status_register.is_carry_bit_set(), op);
+  }
+
+  pub fn bne(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(!self.status_register.is_zero_bit_set(), op);
+  }
+
+  pub fn beq(&mut self) {
+    let op = self.get_single_operand();
+    self.branch(self.status_register.is_zero_bit_set(), op);
+  }
+
+  pub fn brk(&mut self) {
+    self.program_counter.increment();
+    self.nmi_interrupt();
+  }
+
+  pub fn cmp(&mut self, test_value: u8) {
+    self.generic_compare(test_value, self.accumulator.get());
+  }
+
+  pub fn cpx(&mut self, test_value: u8) {
+    self.generic_compare(test_value, self.x_register.get());
+  }
+
+  pub fn cpy(&mut self, test_value: u8) {
+    self.generic_compare(test_value, self.y_register.get());
   }
 
   pub fn clc(&mut self) {
@@ -372,6 +565,111 @@ impl CPU {
     self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
   }
 
+  pub fn dec(&mut self, index: u16) {
+    let value = self.get_u16(index);
+    let value = value.wrapping_sub(1);
+    // extra cycle for modification
+    self.sync();
+    trace!("DEC called index: {}, value: {}", index, value);
+    self.set_u16(index, value);
+    self.status_register.handle_n_flag(value, "DEC");
+    self.status_register.handle_z_flag(value, "DEC");
+  }
+
+  pub fn dec_zp(&mut self) {
+    let (index, _) = self.zero_page("DEC");
+    self.dec(index as u16);
+  }
+
+  pub fn dec_zp_reg(&mut self) {
+    let (index, _) = self.zp_reg("DEC", self.x_register.get());
+    self.dec(index as u16);
+  }
+
+  pub fn dec_abs(&mut self) {
+    let (index, _) = self.absolute("DEC");
+    self.dec(index as u16);
+  }
+
+  pub fn dec_abs_x(&mut self) {
+    let (index, _) = self.absolute_reg("DEC", self.x_register.get());
+    self.dec(index as u16);
+  }
+
+  /// DEDICATED TO XOR - GOD OF INVERSE
+  pub fn eor(&mut self, value: u8) {
+    let message = "EOR";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let result = self.accumulator.get() ^ value;
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  pub fn inc(&mut self, index: u16) {
+    let value = self.memory.get_u16(index);
+    let value = value.wrapping_add(1);
+    // extra cycle for modification
+    self.sync();
+    trace!("INC called index: {}, value: {}", index, value);
+    self.set_u16(index, value);
+    self.status_register.handle_n_flag(value, "INC");
+    self.status_register.handle_z_flag(value, "INC");
+  }
+
+  pub fn inc_zp(&mut self) {
+    let (index, _) = self.zero_page("INC");
+    self.inc(index as u16);
+  }
+
+  pub fn inc_zp_reg(&mut self) {
+    let (index, _) = self.zp_reg("INC", self.x_register.get());
+    self.inc(index as u16);
+  }
+
+  pub fn inc_abs(&mut self) {
+    let (index, _) = self.absolute("INC");
+    self.inc(index as u16);
+  }
+
+  pub fn inc_abs_x(&mut self) {
+    let (index, _) = self.absolute_reg("INC", self.x_register.get());
+    self.inc(index as u16);
+  }
+
+  pub fn jmp_absolute(&mut self) {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
+    trace!("JMP absolute to index: {}", index);
+    self.program_counter.jump(index);
+  }
+
+  pub fn jmp_indirect(&mut self) {
+    let ops = self.get_two_operands();
+    let (low_test, overflow) = ops[0].overflowing_add(1);
+    if overflow {
+      warn!("Indirect jump overflowing page. Results will be weird!");
+    }
+    let hi = self.get_u16(u16::from_le_bytes(ops));
+    let lo = self.get_u16(u16::from_le_bytes([low_test, ops[1]]));
+    let index = u16::from_le_bytes([hi, lo]);
+    trace!("JMP indirect to index: {}", index);
+    self.program_counter.jump(index);
+  }
+
+  pub fn jsr(&mut self) {
+    let ops = self.get_two_operands();
+    self.program_counter.decrease(1);
+    let pc_ops = self.program_counter.get().to_le_bytes();
+    self.memory.push_to_stack(pc_ops[0]);
+    self.memory.push_to_stack(pc_ops[1]);
+    let index = u16::from_le_bytes(ops);
+    trace!("JSR to index: {}, PC stored on stack", index,);
+    // extra cycle needed due the return address
+    self.sync();
+    self.program_counter.jump(index);
+  }
+
   /// Loads the accumulator with the value given
   ///
   /// Affects flags N Z
@@ -381,35 +679,6 @@ impl CPU {
     self.accumulator.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
-    self.cycle_counter += 2;
-  }
-
-  pub fn lda_zero_page(&mut self) {
-    self.generic_zero_page("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_zero_page_x(&mut self) {
-    self.generic_zero_page_x("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute(&mut self) {
-    self.generic_absolute("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute_x(&mut self) {
-    self.generic_abs_x("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_absolute_y(&mut self) {
-    self.generic_abs_y("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_indexed_x(&mut self) {
-    self.generic_indexed_x("LDA", &mut CPU::lda);
-  }
-
-  pub fn lda_indexed_y(&mut self) {
-    self.generic_indexed_y("LDA", &mut CPU::lda);
   }
 
   /// Loads a value into the X register.
@@ -421,23 +690,6 @@ impl CPU {
     self.x_register.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
-    self.cycle_counter += 2;
-  }
-
-  pub fn ldx_zero_page(&mut self) {
-    self.generic_zero_page("LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_zero_page_y(&mut self) {
-    self.generic_zero_page_y("LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_absolute(&mut self) {
-    self.generic_absolute("LDX", &mut CPU::ldx);
-  }
-
-  pub fn ldx_absolute_y(&mut self) {
-    self.generic_abs_y("LDX", &mut CPU::ldx);
   }
 
   /// Loads a value into the Y register.
@@ -449,23 +701,219 @@ impl CPU {
     self.y_register.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
-    self.cycle_counter += 2;
   }
 
-  pub fn ldy_zero_page(&mut self) {
-    self.generic_zero_page("LDY", &mut CPU::ldy);
+  /// Shifts all bits right one position
+  ///
+  /// Affects flags N Z C
+  fn lsr(&mut self, value: u8) -> u8 {
+    let (result, carry) = value.overflowing_shr(1);
+    // extra cycle for modification
+    self.sync();
+    self.status_register.handle_n_flag(result, "LSR");
+    self.status_register.handle_z_flag(result, "LSR");
+    self.status_register.handle_c_flag("LSR", carry);
+    result
   }
 
-  pub fn ldy_zero_page_x(&mut self) {
-    self.generic_zero_page_x("LDY", &mut CPU::ldy);
+  pub fn lsr_accumulator(&mut self) {
+    let result = self.lsr(self.accumulator.get());
+    self.accumulator.set(result);
   }
 
-  pub fn ldy_absolute(&mut self) {
-    self.generic_absolute("LDY", &mut CPU::ldy);
+  pub fn lsr_zero_page(&mut self) {
+    let (index, value) = self.zero_page("LSR");
+    let result = self.lsr(value);
+    self.set_zero_page(index, result);
   }
 
-  pub fn ldy_absolute_x(&mut self) {
-    self.generic_abs_x("LDY", &mut CPU::ldy);
+  pub fn lsr_zero_page_x(&mut self) {
+    let (index, value) = self.zp_reg("LSR", self.x_register.get());
+    let result = self.lsr(value);
+    self.set_zero_page(index, result);
+  }
+
+  pub fn lsr_absolute(&mut self) {
+    let (index, value) = self.absolute("LSR");
+    let result = self.lsr(value);
+    self.set_u16(index, result);
+  }
+
+  pub fn lsr_absolute_x(&mut self) {
+    let (index, value) = self.absolute_reg("LSR", self.x_register.get());
+    let result = self.lsr(value);
+    self.set_u16(index, result);
+  }
+
+  pub fn nop(&mut self) {
+    // Extra cycle as all instruction require two bytes.
+    self.sync();
+  }
+
+  pub fn ora(&mut self, value: u8) {
+    let message = "ORA";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let result = self.accumulator.get() | value;
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  pub fn tax(&mut self) {
+    self.x_register.set(self.x_register.get());
+    self.register_operation(self.x_register.get(), "TAX");
+  }
+
+  pub fn txa(&mut self) {
+    self.accumulator.set(self.x_register.get());
+    self.register_operation(self.x_register.get(), "TXA");
+  }
+
+  pub fn dex(&mut self) {
+    self.x_register.decrement();
+    self.register_operation(self.x_register.get(), "DEX");
+  }
+
+  pub fn inx(&mut self) {
+    self.x_register.increment();
+    self.register_operation(self.x_register.get(), "INX");
+  }
+
+  pub fn tay(&mut self) {
+    self.y_register.set(self.accumulator.get());
+    self.register_operation(self.y_register.get(), "TAY");
+  }
+
+  pub fn tya(&mut self) {
+    self.accumulator.set(self.y_register.get());
+    self.register_operation(self.y_register.get(), "TYA");
+  }
+
+  pub fn dey(&mut self) {
+    self.y_register.decrement();
+    self.register_operation(self.y_register.get(), "DEY");
+  }
+
+  pub fn iny(&mut self) {
+    self.y_register.increment();
+    self.register_operation(self.y_register.get(), "INY");
+  }
+
+  fn rol(&mut self, value: u8) -> u8 {
+    trace!("ROL called with value: {}", value);
+    let (mut result, carry) = value.overflowing_shl(1);
+    // extra cycle for modification
+    self.sync();
+    if self.status_register.is_carry_bit_set() {
+      result |= 0x1;
+    }
+    if carry {
+      self.status_register.set_carry_bit();
+    }
+    self.status_register.handle_n_flag(result, "ROL");
+    self.status_register.handle_z_flag(result, "ROL");
+    result
+  }
+
+  pub fn rol_accumulator(&mut self) {
+    let result = self.rol(self.accumulator.get());
+    self.accumulator.set(result);
+  }
+
+  pub fn rol_zero_page(&mut self) {
+    let (index, value) = self.zero_page("ROL");
+    let result = self.rol(value);
+    self.set_zero_page(index, result);
+  }
+
+  pub fn rol_zero_page_x(&mut self) {
+    let (index, value) = self.zp_reg("ROL", self.x_register.get());
+    let result = self.rol(value);
+    self.set_zero_page(index, result);
+  }
+
+  pub fn rol_absolute(&mut self) {
+    let (index, value) = self.absolute("ROL");
+    let result = self.rol(value);
+    self.set_u16(index, result);
+  }
+
+  pub fn rol_absolute_x(&mut self) {
+    let (index, value) = self.absolute_reg("ROL", self.x_register.get());
+    let result = self.rol(value);
+    self.set_u16(index, result);
+  }
+
+  fn ror(&mut self, value: u8) -> u8 {
+    trace!("ROR called with value: {}", value);
+    let (mut result, carry) = value.overflowing_shl(1);
+    // extra cycle for modification
+    self.sync();
+    if self.status_register.is_carry_bit_set() {
+      result |= 0x1;
+    }
+    if carry {
+      self.status_register.set_carry_bit();
+    }
+    self.status_register.handle_n_flag(result, "ROR");
+    self.status_register.handle_z_flag(result, "ROR");
+    result
+  }
+
+  pub fn ror_accumulator(&mut self) {
+    let result = self.ror(self.accumulator.get());
+    self.accumulator.set(result);
+  }
+
+  pub fn ror_zero_page(&mut self) {
+    let (index, value) = self.zero_page("ROR");
+    let result = self.ror(value);
+    self.set_zero_page(index, result);
+  }
+
+  pub fn ror_zero_page_x(&mut self) {
+    let (index, value) = self.zp_reg("ROR", self.x_register.get());
+    let result = self.ror(value);
+    self.set_zero_page(index, result);
+  }
+
+  pub fn ror_absolute(&mut self) {
+    let (index, value) = self.absolute("ROR");
+    let result = self.ror(value);
+    self.set_u16(index, result);
+  }
+
+  pub fn ror_absolute_x(&mut self) {
+    let (index, value) = self.absolute_reg("ROR", self.x_register.get());
+    let result = self.ror(value);
+    self.set_u16(index, result);
+  }
+
+  /// Return from interrupt
+  pub fn rti(&mut self) {
+    self.return_from_interrupt();
+  }
+
+  pub fn rts(&mut self) {
+    let lo = self.pop_from_stack();
+    let hi = self.pop_from_stack();
+    let index = u16::from_le_bytes([lo, hi]) + 1;
+    // extra cycle to increment the index
+    self.sync();
+    self.program_counter.jump(index);
+    // one byte extra cycle
+    self.sync();
+  }
+
+  pub fn sbc(&mut self, value: u8) {
+    let message = "SBC";
+    trace!("{} called with value: 0x{:X}", message, value);
+    let (result, carry) = self.accumulator.get().overflowing_sub(value);
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_v_flag(result, message, carry);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_c_flag(message, carry);
   }
 
   pub fn sec(&mut self) {
@@ -481,56 +929,107 @@ impl CPU {
   }
 
   pub fn sta_zero_page(&mut self) {
-    let idx = self.get_zp_index();
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self.memory.set_zero_page(idx, self.accumulator.get());
-    self.cycle_counter += 2;
+    let (index, _) = self.zero_page("STA");
+    self.memory.set_zero_page(index, self.accumulator.get());
   }
 
   pub fn sta_zero_page_x(&mut self) {
-    let idx = self.get_zp_index().wrapping_add(self.x_register.get());
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self.memory.set_zero_page(idx, self.accumulator.get());
-    self.cycle_counter += 3;
+    let (index, _) = self.zp_reg("STA", self.x_register.get());
+    self.set_zero_page(index, self.accumulator.get());
   }
 
   pub fn sta_absolute(&mut self) {
-    let idx = self.get_abs_index();
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self.memory.set(idx, self.accumulator.get());
-    self.cycle_counter += 4;
+    let (index, _) = self.absolute("STA");
+    self.memory.set(index, self.accumulator.get());
   }
 
   pub fn sta_absolute_x(&mut self) {
-    let idx = self.get_abs_index() + self.x_register.get() as u16;
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self.memory.set(idx, self.accumulator.get());
-    self.cycle_counter += 5;
+    let (index, _) = self.absolute_reg("STA", self.x_register.get());
+    self.set_u16(index, self.accumulator.get());
   }
 
   pub fn sta_absolute_y(&mut self) {
-    let idx = self.get_abs_index() + self.y_register.get() as u16;
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self.memory.set(idx, self.accumulator.get());
-    self.cycle_counter += 5;
+    let (index, _) = self.absolute_reg("STA", self.y_register.get());
+    self.set_u16(index, self.accumulator.get());
   }
 
   pub fn sta_indexed_x(&mut self) {
-    let op = self.get_zp_index() + self.x_register.get();
-    let idx = self.memory.get_u16_index(op, op + 1);
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self.memory.set(idx, self.accumulator.get());
-    self.cycle_counter += 6;
+    let (index, _) = self.indexed_x("STA");
+    self.memory.set(index, self.accumulator.get());
   }
 
   pub fn sta_indexed_y(&mut self) {
-    let op = self.get_zp_index();
-    let idx = self.memory.get_u16_index(op, op + 1);
-    trace!("STA storing 0x{:X} at 0x{:X}", self.accumulator.get(), idx);
-    self
-      .memory
-      .set(idx + self.y_register.get() as u16, self.accumulator.get());
-    self.cycle_counter += 6;
+    let (index, _) = self.indexed_y("STA");
+    self.set_u16(index, self.accumulator.get());
+    self.sync();
+  }
+
+  pub fn txs(&mut self) {
+    self.memory.set_stack_pointer(self.x_register.get());
+    // extra instruction byte always happens
+    self.sync();
+  }
+
+  pub fn tsx(&mut self) {
+    self.x_register.set(self.memory.get_stack_pointer().get());
+    // extra instruction byte always happens
+    self.sync();
+  }
+
+  pub fn pha(&mut self) {
+    self.push_to_stack(self.accumulator.get());
+    // extra instruction byte always happens
+    self.sync();
+  }
+
+  pub fn pla(&mut self) {
+    let stack_value = self.pop_from_stack();
+    self.accumulator.set(stack_value);
+    // extra instruction byte always happens
+    self.sync();
+  }
+
+  pub fn php(&mut self) {
+    self.push_to_stack(self.status_register.get_register());
+    // extra instruction byte always happens
+    self.sync();
+  }
+
+  pub fn plp(&mut self) {
+    let stack = self.pop_from_stack();
+    self.status_register.set(stack);
+    // extra instruction byte always happens
+    self.sync();
+  }
+
+  pub fn stx_zero_page(&mut self) {
+    let (index, _) = self.zero_page("STX");
+    self.memory.set_zero_page(index, self.x_register.get());
+  }
+
+  pub fn stx_zero_page_y(&mut self) {
+    let (index, _) = self.zp_reg("STX", self.y_register.get());
+    self.memory.set_zero_page(index, self.x_register.get());
+  }
+
+  pub fn stx_absolute(&mut self) {
+    let (index, _) = self.absolute("STX");
+    self.memory.set(index, self.x_register.get());
+  }
+
+  pub fn sty_zero_page(&mut self) {
+    let (index, _) = self.zero_page("STY");
+    self.memory.set_zero_page(index, self.y_register.get());
+  }
+
+  pub fn sty_zero_page_y(&mut self) {
+    let (index, _) = self.zp_reg("STY", self.x_register.get());
+    self.memory.set_zero_page(index, self.y_register.get());
+  }
+
+  pub fn sty_absolute(&mut self) {
+    let (index, _) = self.absolute("STY");
+    self.memory.set(index, self.y_register.get());
   }
 }
 
@@ -539,7 +1038,7 @@ impl Display for CPU {
     write!(
       f,
       "program_counter: 0x{:X}\nstack_pointer: 0x{:X}\naccumulator: 0x{:X}\nstatus_register: {}\nx_register: 0x{:X}\ny_register: 0x{:X}\n",
-      self.program_counter.get(), self.stack_pointer.get(), self.accumulator.get(), self.status_register, self.x_register.get(), self.y_register.get()
+      self.program_counter.get(), self.memory.get_stack_pointer().get(), self.accumulator.get(), self.status_register, self.x_register.get(), self.y_register.get()
     )
   }
 }
@@ -547,735 +1046,4 @@ impl Display for CPU {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use rand::distributions::uniform::SampleUniform;
-  use rand::prelude::*;
-  use rand::{thread_rng, Rng};
-  use test_case::test_case;
-
-  fn rand_range<T: SampleUniform>(min: T, max: T) -> T {
-    let mut rng = thread_rng();
-    rng.gen_range(min, max)
-  }
-
-  fn no_wrap() -> u8 {
-    rand_range(0x0, 0x7F)
-  }
-
-  fn wrap() -> u8 {
-    rand_range(0x7F, 0xFF)
-  }
-
-  fn r_lsb() -> u8 {
-    rand_range(0, 0xFE)
-  }
-
-  #[test]
-  fn create_new_cpu() {
-    let cpu = CPU::new();
-    assert_eq!(cpu.accumulator.get(), 0);
-    assert_eq!(cpu.program_counter.get(), 0);
-    assert_eq!(cpu.stack_pointer.get(), 0);
-    assert_eq!(cpu.x_register.get(), 0);
-    assert_eq!(cpu.y_register.get(), 0);
-  }
-
-  #[test]
-  fn reset_cpu() {
-    let mut cpu = CPU::new();
-    cpu.stack_pointer.decrement();
-    cpu.program_counter.advance(1);
-    cpu.accumulator.set(23);
-    cpu.x_register.set(23);
-    cpu.y_register.set(23);
-    cpu.status_register.set_break_bit();
-    cpu.cycle_counter = random();
-    cpu.reset();
-    assert_eq!(cpu.accumulator.get(), 0);
-    assert_eq!(cpu.program_counter.get(), 0);
-    assert_eq!(cpu.stack_pointer.get(), 0);
-    assert_eq!(cpu.x_register.get(), 0);
-    assert_eq!(cpu.y_register.get(), 0);
-    assert_eq!(cpu.cycle_counter, 0);
-  }
-
-  fn setup(acc: u8) -> CPU {
-    let mut cpu = CPU::new();
-    cpu.accumulator.set(acc);
-    cpu.program_counter.advance(1);
-    cpu
-  }
-
-  fn setup_zp(acc: u8, index: u8, value: u8) -> CPU {
-    let mut cpu = setup(acc);
-    cpu.memory.set_zero_page(index, value);
-    cpu
-      .memory
-      .set_zero_page(cpu.program_counter.get() as u8 + 1, index);
-    cpu
-  }
-
-  fn setup_zp_reg(acc: u8, index: u8, reg: u8, value: u8) -> CPU {
-    let mut cpu = setup(acc);
-    cpu.memory.set_zero_page(index.wrapping_add(reg), value);
-    cpu
-      .memory
-      .set_zero_page(cpu.program_counter.get() as u8 + 1, index);
-    cpu
-  }
-
-  fn setup_abs(acc: u8, index: u16, value: u8) -> CPU {
-    let mut cpu = setup(acc);
-    let result = index.to_le_bytes();
-    cpu
-      .memory
-      .set_zero_page(cpu.program_counter.get() as u8 + 1, result[0]);
-    cpu
-      .memory
-      .set_zero_page(cpu.program_counter.get() as u8 + 2, result[1]);
-    cpu.memory.set(index, value);
-    cpu
-  }
-
-  fn setup_abs_reg(acc: u8, index: u16, reg: u8, value: u8) -> CPU {
-    let mut cpu = setup(acc);
-    let result = (index).to_le_bytes();
-    cpu
-      .memory
-      .set_zero_page(cpu.program_counter.get() as u8 + 1, result[0]);
-    cpu
-      .memory
-      .set_zero_page(cpu.program_counter.get() as u8 + 2, result[1]);
-    cpu.memory.set(index.wrapping_add(reg as u16), value);
-    cpu
-  }
-
-  fn setup_indexed_x(acc: u8, value: u8, v1: u8, v2: u8, op: u8, reg_v: u8) -> CPU {
-    let mut cpu = setup(acc);
-    let index = u16::from_le_bytes([v1, v2]);
-    cpu.memory.set(index, value);
-    cpu.memory.set(cpu.program_counter.get() as u16 + 1, op);
-    let b_index = op.wrapping_add(reg_v);
-    cpu.memory.set_zero_page(b_index, v1);
-    cpu.memory.set_zero_page(b_index.wrapping_add(1), v2);
-    cpu
-  }
-
-  fn setup_indexed_y(acc: u8, value: u8, v1: u8, v2: u8, op: u8, reg_v: u8) -> CPU {
-    let mut cpu = setup(acc);
-    let index = u16::from_le_bytes([v1, v2]);
-    cpu.memory.set(index + reg_v as u16, value);
-    cpu.memory.set(cpu.program_counter.get() as u16 + 1, op);
-    cpu.memory.set_zero_page(op, v1);
-    cpu.memory.set_zero_page(op.wrapping_add(1), v2);
-    cpu
-  }
-
-  fn setup_carry(cpu: &mut CPU, carry: u8) {
-    if carry > 0 {
-      cpu.status_register.set_carry_bit();
-    }
-  }
-
-  #[test_case(no_wrap(), no_wrap(), 0; "adc without wrap without carry set")]
-  #[test_case(wrap(), wrap(), 0; "adc with wrap without carry set")]
-  #[test_case(no_wrap(), no_wrap(), 1; "adc without wrap with carry set")]
-  #[test_case(wrap(), wrap(), 1; "adc with wrap with carry set")]
-  fn adc(acc: u8, operand: u8, carry: u8) {
-    let mut cpu = setup(acc);
-    setup_carry(&mut cpu, carry);
-    // needed because we're not calling the operand as we would normally
-    cpu.program_counter.get_next();
-    cpu.adc(operand);
-    assert_eq!(
-      cpu.accumulator.get(),
-      acc.wrapping_add(operand).wrapping_add(carry)
-    );
-    assert_eq!(cpu.program_counter.get(), 2);
-  }
-
-  #[test_case(no_wrap(), random(), no_wrap(), 0; "zero page without wrap without carry")]
-  #[test_case(wrap(), random(), wrap(), 0; "zero page with wrap without carry")]
-  #[test_case(no_wrap(), random(), no_wrap(), 1; "zero page without wrap with carry")]
-  #[test_case(wrap(), random(), wrap(), 1; "zero page with wrap with carry")]
-  fn adc_zero_page(acc: u8, index: u8, value: u8, carry: u8) {
-    let mut cpu = setup_zp(acc, index, value);
-    setup_carry(&mut cpu, carry);
-    cpu.adc_zero_page();
-    assert_eq!(
-      cpu.accumulator.get(),
-      acc.wrapping_add(value).wrapping_add(carry)
-    );
-    assert_eq!(cpu.program_counter.get(), 2);
-  }
-
-  #[test_case(no_wrap(), random(), random(), no_wrap(), 0; "indexed zero page without wrap without carry")]
-  #[test_case(wrap(), random(), random(), wrap(), 0; "indexed zero page with wrap without carry")]
-  #[test_case(no_wrap(), random(), random(), no_wrap(), 1; "indexed zero page without wrap with carry")]
-  #[test_case(wrap(), random(), random(), wrap(), 1; "indexed zero page with wrap with carry")]
-  fn adc_zero_page_x(acc: u8, operand: u8, x: u8, value: u8, carry: u8) {
-    let mut cpu = setup_zp_reg(acc, operand, x, value);
-    setup_carry(&mut cpu, carry);
-    cpu.x_register.set(x);
-    cpu.adc_zero_page_x();
-    assert_eq!(
-      cpu.accumulator.get(),
-      acc.wrapping_add(value).wrapping_add(carry)
-    );
-    assert_eq!(cpu.program_counter.get(), 2);
-  }
-
-  #[test_case(random(), no_wrap(), no_wrap(), 0; "absolute without wrap without carry")]
-  #[test_case(random(), wrap(), wrap(), 0; "absolute with wrap without carry")]
-  #[test_case(random(), no_wrap(), no_wrap(), 1; "absolute without wrap with carry")]
-  #[test_case(random(), wrap(), wrap(), 1; "absolute with wrap with carry")]
-  fn adc_absolute(index: u16, value: u8, acc: u8, carry: u8) {
-    let mut cpu = setup_abs(acc, index, value);
-    setup_carry(&mut cpu, carry);
-    cpu.adc_absolute();
-    assert_eq!(
-      cpu.accumulator.get(),
-      value.wrapping_add(acc).wrapping_add(carry)
-    );
-    assert_eq!(cpu.program_counter.get(), 3);
-  }
-
-  #[test_case(no_wrap(), random(), random(), no_wrap(), 0; "absolute x without wrap without carry")]
-  #[test_case(wrap(), random(), random(), wrap(), 0; "absolute x with wrap without carry")]
-  #[test_case(no_wrap(), random(), random(), no_wrap(), 1; "absolute x without wrap with carry")]
-  #[test_case(wrap(), random(), random(), wrap(), 1; "absolute x with wrap with carry")]
-  fn adc_absolute_x(acc: u8, index: u16, x: u8, value: u8, carry: u8) {
-    let mut cpu = setup_abs_reg(acc, index, x, value);
-    setup_carry(&mut cpu, carry);
-    cpu.x_register.set(x);
-    cpu.adc_absolute_x();
-    assert_eq!(cpu.accumulator.get(), value.wrapping_add(acc) + carry);
-    assert_eq!(cpu.program_counter.get(), 3);
-  }
-
-  #[test_case(no_wrap(), random(), random(), no_wrap(), 0; "absolute y without wrap without carry")]
-  #[test_case(wrap(), random(), random(), wrap(), 0; "absolute y with wrap without carry")]
-  #[test_case(no_wrap(), random(), random(), no_wrap(), 1; "absolute y without wrap with carry")]
-  #[test_case(wrap(), random(), random(), wrap(), 1; "absolute y with wrap with carry")]
-  fn adc_absolute_y(acc: u8, index: u16, y: u8, value: u8, carry: u8) {
-    let mut cpu = setup_abs_reg(acc, index, y, value);
-    setup_carry(&mut cpu, carry);
-    cpu.y_register.set(y);
-    cpu.adc_absolute_y();
-    assert_eq!(cpu.accumulator.get(), value.wrapping_add(acc) + carry);
-    assert_eq!(cpu.program_counter.get(), 3);
-  }
-
-  #[test_case(no_wrap(), r_lsb(), random(), random(), random(), no_wrap(), 0; "indexed x without wrap without carry")]
-  #[test_case(wrap(), r_lsb(), random(), random(), random(), wrap(), 0; "indexed x with wrap without carry")]
-  #[test_case(no_wrap(), r_lsb(), random(), random(), random(), no_wrap(), 1; "indexed x without wrap with carry")]
-  #[test_case(wrap(), r_lsb(), random(), random(), random(), wrap(), 1; "indexed x with wrap with carry")]
-  fn adc_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, value: u8, carry: u8) {
-    let mut cpu = setup_indexed_x(acc, value, v1, v2, operand, x);
-    setup_carry(&mut cpu, carry);
-    cpu.x_register.set(x);
-    cpu.adc_indexed_x();
-    assert_eq!(
-      cpu.accumulator.get(),
-      value.wrapping_add(acc).wrapping_add(carry)
-    );
-    assert_eq!(cpu.program_counter.get(), 2);
-  }
-
-  #[test_case(no_wrap(), r_lsb(), random(), random(), random(), no_wrap(), 0; "indexed y without wrap without carry")]
-  #[test_case(wrap(), r_lsb(), random(), random(), random(), wrap(), 0; "indexed y with wrap without carry")]
-  #[test_case(no_wrap(), r_lsb(), random(), random(), random(), no_wrap(), 1; "indexed y without wrap with carry")]
-  #[test_case(wrap(), r_lsb(), random(), random(), random(), wrap(), 1; "indexed y with wrap with carry")]
-  fn adc_indexed_y(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, value: u8, carry: u8) {
-    let mut cpu = setup_indexed_y(acc, value, v1, v2, operand, x);
-    setup_carry(&mut cpu, carry);
-    cpu.y_register.set(x);
-    cpu.adc_indexed_y();
-    assert_eq!(
-      cpu.accumulator.get(),
-      value.wrapping_add(acc).wrapping_add(carry)
-    );
-    assert_eq!(cpu.program_counter.get(), 2);
-  }
-
-  // #[test_case(random(), random())]
-  // fn and_basic(acc: u8, operand: u8) {
-  //   let mut cpu = setup(acc);
-  //   cpu.and(operand);
-  //   assert_eq!(cpu.accumulator.get(), acc & operand);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn and_zero_page(acc: u8, index: u8, value: u8) {
-  //   let mut cpu = setup_zp(acc, index, value);
-  //   cpu.and_zero_page(index);
-  //   assert_eq!(cpu.accumulator.get(), acc & value);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random(), random())]
-  // fn and_zero_page_x(acc: u8, index: u8, value: u8, x: u8) {
-  //   let mut cpu = setup_zp(acc, index.wrapping_add(x), value);
-  //   cpu.x_register.set(x);
-  //   cpu.and_zero_page_x(index);
-  //   assert_eq!(cpu.accumulator.get(), acc & value);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn and_absolute(acc: u8, index: u16, value: u8) {
-  //   let mut cpu = setup_abs(acc, index, value);
-  //   cpu.and_absolute(index);
-  //   assert_eq!(cpu.accumulator.get(), acc & value);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random(), random())]
-  // fn and_absolute_x(acc: u8, index: u16, value: u8, x: u8) {
-  //   let mut cpu = setup_abs(acc, index.wrapping_add(x as u16), value);
-  //   cpu.x_register.set(x);
-  //   cpu.and_absolute_x(index);
-  //   assert_eq!(cpu.accumulator.get(), acc & value);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random(), random())]
-  // fn and_absolute_y(acc: u8, index: u16, value: u8, y: u8) {
-  //   let mut cpu = setup_abs(acc, index.wrapping_add(y as u16), value);
-  //   cpu.y_register.set(y);
-  //   cpu.and_absolute_y(index);
-  //   assert_eq!(cpu.accumulator.get(), acc & value);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random(), 0xCA, 0x4F, 0x4FCA, random())]
-  // fn and_indexed_x(acc: u8, operand: u8, x: u8, v1: u8, v2: u8, index: u16, value: u8) {
-  //   let mut cpu = setup_indexed_x(acc, index, value, v1, v2, operand, x);
-  //   cpu.x_register.set(x);
-  //   cpu.and_indexed_x(operand);
-  //   assert_eq!(cpu.accumulator.get(), value & acc);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random(), 0xCA, 0x4F, 0x4FCA, random())]
-  // fn and_indexed_y(acc: u8, operand: u8, y: u8, v1: u8, v2: u8, index: u16, value: u8) {
-  //   let mut cpu = setup_indexed_y(acc, index, value, v1, v2, operand, y);
-  //   cpu.y_register.set(y);
-  //   cpu.and_indexed_y(operand);
-  //   assert_eq!(cpu.accumulator.get(), value & acc);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(no_wrap(); "without wrap")]
-  // #[test_case(wrap(); "with wrap")]
-  // fn asl(val: u8) {
-  //   let mut cpu = CPU::new();
-  //   let result = cpu.asl(val);
-  //   assert_eq!(result, val.wrapping_shl(1));
-  // }
-
-  // #[test_case(no_wrap(); "without wrap")]
-  // #[test_case(wrap(); "with wrap")]
-  // fn asl_accumulator(acc: u8) {
-  //   let mut cpu = setup(acc);
-  //   cpu.asl_accumulator();
-  //   assert_eq!(cpu.accumulator.get(), acc.wrapping_shl(1));
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test_case(random(), no_wrap(); "without wrap")]
-  // #[test_case(random(), wrap(); "with wrap")]
-  // fn asl_zero_page(index: u8, value: u8) {
-  //   let mut cpu = setup_zp(0, index, value);
-  //   cpu.asl_zero_page(index);
-  //   assert_eq!(cpu.memory.get_zero_page(index), value.wrapping_shl(1));
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(no_wrap(), no_wrap(), no_wrap(); "without shift wrap without index wrap")]
-  // #[test_case(no_wrap(), wrap(), no_wrap(); "with shift wrap without index wrap")]
-  // #[test_case(wrap(), no_wrap(), wrap(); "without shift wrap with index wrap")]
-  // #[test_case(wrap(), wrap(), wrap(); "with shift wrap with index wrap")]
-  // fn asl_zero_page_x(index: u8, value: u8, x: u8) {
-  //   let mod_index = index.wrapping_add(x);
-  //   let mut cpu = setup_zp(0, mod_index, value);
-  //   cpu.x_register.set(x);
-  //   cpu.asl_zero_page_x(index);
-  //   assert_eq!(cpu.memory.get_zero_page(mod_index), value.wrapping_shl(1));
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), no_wrap(); "without wrap")]
-  // #[test_case(random(), wrap(); "with wrap")]
-  // fn asl_absolute(index: u16, value: u8) {
-  //   let mut cpu = setup_abs(0, index, value);
-  //   cpu.asl_absolute(index);
-  //   assert_eq!(cpu.memory.get_u16(index), value.wrapping_shl(1));
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), no_wrap(), no_wrap(); "without wrap")]
-  // #[test_case(random(), no_wrap(), wrap(); "with wrap")]
-  // fn asl_absolute_x(index: u16, value: u8, x: u8) {
-  //   let mod_index = index.wrapping_add(x as u16);
-  //   let mut cpu = setup_abs(0, mod_index, value);
-  //   cpu.x_register.set(x);
-  //   cpu.asl_absolute_x(index);
-  //   assert_eq!(cpu.memory.get_u16(mod_index), value.wrapping_shl(1));
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test]
-  // fn bit_zero_bit() {
-  //   let mut cpu = CPU::new();
-  //   cpu.bit(0);
-  //   assert_eq!(cpu.status_register.is_zero_bit_set(), true);
-  //   cpu.accumulator.set(0xFF);
-  //   cpu.bit(0xFF);
-  //   assert_eq!(cpu.status_register.is_zero_bit_set(), false);
-  // }
-
-  // fn is_zero_bit_set(val: u8) -> bool {
-  //   val == 0
-  // }
-
-  // fn is_overflow_bit_set(val: u8) -> bool {
-  //   val & 0x40 > 0
-  // }
-
-  // fn is_negative_bit_set(val: u8) -> bool {
-  //   val & 0x80 > 0
-  // }
-
-  // #[test_case(random())]
-  // fn bit_overflow_bit(val: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.bit(val);
-  //   assert_eq!(
-  //     cpu.status_register.is_overflow_bit_set(),
-  //     is_overflow_bit_set(val)
-  //   );
-  // }
-
-  // #[test_case(random())]
-  // fn bit_negative_bit(val: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.bit(val);
-  //   assert_eq!(
-  //     cpu.status_register.is_negative_bit_set(),
-  //     is_negative_bit_set(val)
-  //   );
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn bit_zero_page(val: u8, index: u8, acc: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.memory.set_zero_page(index, val);
-  //   cpu.accumulator.set(acc);
-  //   cpu.bit_zero_page(index);
-  //   assert_eq!(
-  //     cpu.status_register.is_zero_bit_set(),
-  //     is_zero_bit_set(val & acc)
-  //   );
-  //   assert_eq!(
-  //     cpu.status_register.is_negative_bit_set(),
-  //     is_negative_bit_set(val)
-  //   );
-  //   assert_eq!(
-  //     cpu.status_register.is_overflow_bit_set(),
-  //     is_overflow_bit_set(val)
-  //   );
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn bit_absolute(index: u16, val: u8, acc: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.memory.set(index, val);
-  //   cpu.program_counter.get_next();
-  //   cpu.accumulator.set(acc);
-  //   cpu.bit_absolute(index);
-  //   assert_eq!(
-  //     cpu.status_register.is_zero_bit_set(),
-  //     is_zero_bit_set(val & acc)
-  //   );
-  //   assert_eq!(
-  //     cpu.status_register.is_negative_bit_set(),
-  //     is_negative_bit_set(val)
-  //   );
-  //   assert_eq!(
-  //     cpu.status_register.is_overflow_bit_set(),
-  //     is_overflow_bit_set(val)
-  //   );
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test]
-  // fn clc() {
-  //   let mut cpu = CPU::new();
-  //   cpu.status_register.set_carry_bit();
-  //   cpu.program_counter.get_next();
-  //   cpu.clc();
-  //   assert_eq!(cpu.status_register.is_carry_bit_set(), false);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test]
-  // fn cld() {
-  //   let mut cpu = CPU::new();
-  //   cpu.status_register.set_decimal_bit();
-  //   cpu.program_counter.get_next();
-  //   cpu.cld();
-  //   assert_eq!(cpu.status_register.is_decimal_bit_set(), false);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test]
-  // fn cli() {
-  //   let mut cpu = CPU::new();
-  //   cpu.status_register.set_interrupt_bit();
-  //   cpu.program_counter.get_next();
-  //   cpu.cli();
-  //   assert_eq!(cpu.status_register.is_interrupt_bit_set(), false);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test]
-  // fn clv() {
-  //   let mut cpu = CPU::new();
-  //   cpu.status_register.set_overflow_bit();
-  //   cpu.program_counter.get_next();
-  //   cpu.clv();
-  //   assert_eq!(cpu.status_register.is_overflow_bit_set(), false);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test_case(random())]
-  // fn lda(val: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.lda(val);
-  //   assert_eq!(cpu.accumulator.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn lda_zero_page(val: u8, index: u8) {
-  //   let mut cpu = setup_zp(0, index, val);
-  //   cpu.lda_zero_page(index);
-  //   assert_eq!(cpu.accumulator.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn lda_zero_page_x(val: u8, x: u8, index: u8) {
-  //   let mut cpu = setup_zp(0, index.wrapping_add(x), val);
-  //   cpu.x_register.set(x);
-  //   cpu.lda_zero_page_x(index);
-  //   assert_eq!(cpu.accumulator.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn lda_absolute(index: u16, val: u8) {
-  //   let mut cpu = setup_abs(0, index, val);
-  //   cpu.lda_absolute(index);
-  //   assert_eq!(cpu.accumulator.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn lda_absolute_x(index: u16, val: u8, x: u8) {
-  //   let mut cpu = setup_abs(0, index + x as u16, val);
-  //   cpu.x_register.set(x);
-  //   cpu.lda_absolute_x(index);
-  //   assert_eq!(cpu.accumulator.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn lda_absolute_y(index: u16, y: u8, val: u8) {
-  //   let mut cpu = setup_abs(0, index + y as u16, val);
-  //   cpu.y_register.set(y);
-  //   cpu.lda_absolute_y(index);
-  //   assert_eq!(cpu.accumulator.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random())]
-  // fn ldx(val: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.ldx(val);
-  //   assert_eq!(cpu.x_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn ldx_zero_page(index: u8, val: u8) {
-  //   let mut cpu = setup_zp(0, index, val);
-  //   cpu.ldx_zero_page(index);
-  //   assert_eq!(cpu.x_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn ldx_zero_page_y(index: u8, val: u8, y: u8) {
-  //   let mut cpu = setup_zp(0, index.wrapping_add(y), val);
-  //   cpu.y_register.set(y);
-  //   cpu.ldx_zero_page_y(index);
-  //   assert_eq!(cpu.x_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn ldx_absolute(index: u16, val: u8) {
-  //   let mut cpu = setup_abs(0, index, val);
-  //   cpu.ldx_absolute(index);
-  //   assert_eq!(cpu.x_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn ldx_absolute_y(index: u16, val: u8, y: u8) {
-  //   let mut cpu = setup_abs(0, index.wrapping_add(y as u16), val);
-  //   cpu.y_register.set(y);
-  //   cpu.ldx_absolute_y(index);
-  //   assert_eq!(cpu.x_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random())]
-  // fn ldy(val: u8) {
-  //   let mut cpu = CPU::new();
-  //   cpu.ldy(val);
-  //   assert_eq!(cpu.y_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn ldy_zero_page(index: u8, val: u8) {
-  //   let mut cpu = setup_zp(0, index, val);
-  //   cpu.ldy_zero_page(index);
-  //   assert_eq!(cpu.y_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn ldy_zero_page_x(index: u8, val: u8, x: u8) {
-  //   let mut cpu = setup_zp(0, index.wrapping_add(x), val);
-  //   cpu.x_register.set(x);
-  //   cpu.ldy_zero_page_x(index);
-  //   assert_eq!(cpu.y_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn ldy_absolute(index: u16, val: u8) {
-  //   let mut cpu = setup_abs(0, index, val);
-  //   cpu.ldy_absolute(index);
-  //   assert_eq!(cpu.y_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn ldy_absolute_x(index: u16, val: u8, x: u8) {
-  //   let mut cpu = setup_abs(0, index.wrapping_add(x as u16), val);
-  //   cpu.x_register.set(x);
-  //   cpu.ldy_absolute_x(index);
-  //   assert_eq!(cpu.y_register.get(), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn sta_zero_page(val: u8, index: u8) {
-  //   let mut cpu = setup(val);
-  //   cpu.sta_zero_page(index);
-  //   assert_eq!(cpu.memory.get_zero_page(index), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn sta_zero_page_x(val: u8, index: u8, x: u8) {
-  //   let mut cpu = setup(val);
-  //   cpu.x_register.set(x);
-  //   cpu.sta_zero_page_x(index);
-  //   assert_eq!(cpu.memory.get_zero_page(index.wrapping_add(x)), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random())]
-  // fn sta_absolute(val: u8, index: u16) {
-  //   let mut cpu = setup(val);
-  //   cpu.sta_absolute(index);
-  //   assert_eq!(cpu.memory.get_u16(index), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn sta_absolute_x(val: u8, index: u16, x: u8) {
-  //   let mut cpu = setup(val);
-  //   cpu.x_register.set(x);
-  //   cpu.sta_absolute_x(index);
-  //   assert_eq!(cpu.memory.get_u16(index.wrapping_add(x as u16)), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random())]
-  // fn sta_absolute_y(val: u8, index: u16, y: u8) {
-  //   let mut cpu = setup(val);
-  //   cpu.y_register.set(y);
-  //   cpu.sta_absolute_y(index);
-  //   assert_eq!(cpu.memory.get_u16(index.wrapping_add(y as u16)), val);
-  //   assert_eq!(cpu.program_counter.get(), 3);
-  // }
-
-  // #[test_case(random(), random(), random(), 0x20, 0x25, 0x2520)]
-  // fn sta_indexed_x(val: u8, x: u8, op: u8, v1: u8, v2: u8, index: u16) {
-  //   let mut cpu = setup(val);
-  //   cpu.x_register.set(x);
-  //   cpu.memory.set_zero_page(op.wrapping_add(x), v1);
-  //   cpu
-  //     .memory
-  //     .set_zero_page(op.wrapping_add(x).wrapping_add(1), v2);
-  //   cpu.sta_indexed_x(op);
-  //   assert_eq!(cpu.memory.get_u16(index), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test_case(random(), random(), random(), 0x57, 0xCB, 0xCB57)]
-  // fn sta_indexed_y(val: u8, y: u8, op: u8, v1: u8, v2: u8, index: u16) {
-  //   let mut cpu = setup(val);
-  //   cpu.y_register.set(y);
-  //   cpu.memory.set_zero_page(op, v1);
-  //   cpu.memory.set_zero_page(op.wrapping_add(1), v2);
-  //   cpu.sta_indexed_y(op);
-  //   assert_eq!(cpu.memory.get_u16(index.wrapping_add(y as u16)), val);
-  //   assert_eq!(cpu.program_counter.get(), 2);
-  // }
-
-  // #[test]
-  // fn sec() {
-  //   let mut cpu = CPU::new();
-  //   cpu.program_counter.get_next();
-  //   cpu.sec();
-  //   assert_eq!(cpu.status_register.is_carry_bit_set(), true);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test]
-  // fn sed() {
-  //   let mut cpu = CPU::new();
-  //   cpu.program_counter.get_next();
-  //   cpu.sed();
-  //   assert_eq!(cpu.status_register.is_decimal_bit_set(), true);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
-
-  // #[test]
-  // fn sei() {
-  //   let mut cpu = CPU::new();
-  //   cpu.program_counter.get_next();
-  //   cpu.sei();
-  //   assert_eq!(cpu.status_register.is_interrupt_bit_set(), true);
-  //   assert_eq!(cpu.program_counter.get(), 1);
-  // }
 }

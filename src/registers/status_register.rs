@@ -14,9 +14,12 @@ impl StatusRegister {
     self.register = 0;
   }
 
-  #[allow(dead_code)]
   pub fn get_register(&self) -> u8 {
     self.register
+  }
+
+  pub fn set(&mut self, val: u8) {
+    self.register = val;
   }
 
   fn set_status_register(&mut self, bit: StatusBit) {

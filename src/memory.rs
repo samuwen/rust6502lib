@@ -1,17 +1,24 @@
+use crate::StackPointer;
+use log::warn;
+
 pub struct Memory {
   mem: [u8; 0xFFFF],
+  sp: StackPointer,
 }
 
 impl Memory {
   pub fn new() -> Memory {
-    Memory { mem: [0; 0xFFFF] }
+    Memory {
+      mem: [0; 0xFFFF],
+      sp: StackPointer::new(),
+    }
   }
 
   pub fn reset(&mut self) {
     self.mem = [0; 0xFFFF];
+    self.sp.reset();
   }
 
-  #[allow(dead_code)]
   pub fn set(&mut self, index: u16, value: u8) {
     self.mem[index as usize] = value;
   }
@@ -24,40 +31,29 @@ impl Memory {
     self.mem[index as usize]
   }
 
-  pub fn get(&self, index: usize) -> u8 {
-    self.mem[index]
-  }
-
   pub fn get_u16(&self, index: u16) -> u8 {
-    self.get(index as usize)
-  }
-
-  /// Computes a memory address and returns the value contained within.
-  ///
-  /// Takes in a pair of values and gets a Most Significant and Least Significant
-  /// Byte pair from them, having added the register value first.
-  /// Then arranges the values in little endian and returns the index.
-  pub fn get_pre_indexed_data(&self, operand: u8) -> u8 {
-    let lsb = self.get_zero_page(operand);
-    let msb = self.get_zero_page(operand + 1);
-    let index = self.get_u16_index(lsb, msb);
+    if index <= 0x1FF && index >= 0x100 {
+      warn!("Accessing memory from the stack improperly!");
+    }
     self.mem[index as usize]
   }
 
-  /// Computes a memory address, adds a register value, and returns the value contained within.
-  ///
-  /// Takes in a pair of values and gets a Most Significant and Least Significant
-  /// Byte pair from theem. Then arranges the values in little endian, adds the register value
-  /// to the address, then returns the index.
-  pub fn get_post_indexed_data(&self, operand: u8, register_value: u8) -> u8 {
-    let lsb = self.get_zero_page(operand);
-    let msb = self.get_zero_page(operand + 1);
-    let index = self.get_u16_index(lsb, msb);
-    self.mem[(index + register_value as u16) as usize]
+  /// Adds a value to the stack. Takes in a value to be entered and the stack pointer.
+  pub fn push_to_stack(&mut self, value: u8) {
+    self.mem[(0x100 | self.sp.push()) as usize] = value;
   }
 
-  pub fn get_u16_index(&self, lsb: u8, msb: u8) -> u16 {
-    u16::from_le_bytes([lsb, msb])
+  /// Takes a value from the stack. Returns the value at the current stack pointer.
+  pub fn pop_from_stack(&mut self) -> u8 {
+    self.mem[(0x100 | self.sp.pop()) as usize]
+  }
+
+  pub fn get_stack_pointer(&self) -> &StackPointer {
+    &self.sp
+  }
+
+  pub fn set_stack_pointer(&mut self, val: u8) {
+    self.sp.set(val);
   }
 }
 
@@ -107,20 +103,17 @@ mod tests {
   }
 
   #[test]
-  fn get_pre_indexed_data() {
+  fn push_to_stack() {
     let mut memory = Memory::new();
-    memory.mem[0x98] = 0x34;
-    memory.mem[0x99] = 0x12;
-    memory.mem[0x1234] = 0x56;
-    assert_eq!(memory.get_pre_indexed_data(0x98), 0x56);
+    memory.push_to_stack(0x10);
+    assert_eq!(memory.get_u16(0x1FF), 0x10);
   }
 
   #[test]
-  fn get_post_indexed_data() {
+  fn pop_from_stack() {
     let mut memory = Memory::new();
-    memory.mem[0x86] = 0x28;
-    memory.mem[0x87] = 0x40;
-    memory.mem[0x4038] = 0x56;
-    assert_eq!(memory.get_post_indexed_data(0x86, 0x10), 0x56);
+    memory.set(0x1FF, 0x10);
+    let result = memory.pop_from_stack();
+    assert_eq!(result, 0x10);
   }
 }

@@ -1,5 +1,3 @@
-mod parser;
-
 use emu_attack::*;
 use flexi_logger::{default_format, Logger};
 use log::debug;
@@ -15,7 +13,8 @@ fn main() {
   let pattern = std::env::args().nth(1).expect("no pattern given");
   if &pattern == "parser" {
     debug!("Initialized in parser mode");
-    let mut parser = parser::Parser::new();
+    debug!("Disabled for the moment");
+  // let mut parser = parser::Parser::new();
   // parser.run();
   } else {
     debug!("Initialized in program mode");
