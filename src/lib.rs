@@ -176,6 +176,7 @@ impl CPU {
         0x09 => self.immediate_cb("ORA", &mut Self::ora),
         0x0A => self.asl_accumulator(),
         0x0B => self.immediate_cb("AAC", &mut Self::aac),
+        0x0C => self.absolute_cb("TOP", &mut Self::top),
         0x0D => self.absolute_cb("ORA", &mut Self::ora),
         0x0E => self.asl_absolute(),
         0x0F => self.absolute_cb("SLO", &mut Self::slo),
@@ -191,6 +192,7 @@ impl CPU {
         0x19 => self.absolute_y_cb("ORA", &mut Self::ora),
         0x1A => self.nop(),
         0x1B => self.absolute_y_cb("SLO", &mut Self::slo),
+        0x1C => self.absolute_x_cb("TOP", &mut Self::top),
         0x1D => self.absolute_x_cb("ORA", &mut Self::ora),
         0x1E => self.asl_absolute_x(),
         0x1F => self.absolute_x_cb("SLO", &mut Self::slo),
@@ -222,6 +224,7 @@ impl CPU {
         0x39 => self.absolute_y_cb("AND", &mut Self::and),
         0x3A => self.nop(),
         0x3B => self.absolute_y_cb("RLA", &mut Self::rla),
+        0x3C => self.absolute_x_cb("TOP", &mut Self::top),
         0x3D => self.absolute_x_cb("AND", &mut Self::and),
         0x3E => self.rol_absolute_x(),
         0x3F => self.absolute_x_cb("RLA", &mut Self::rla),
@@ -252,6 +255,7 @@ impl CPU {
         0x58 => self.cli(),
         0x59 => self.absolute_y_cb("EOR", &mut Self::eor),
         0x5A => self.nop(),
+        0x5C => self.absolute_x_cb("TOP", &mut Self::top),
         0x5D => self.absolute_x_cb("EOR", &mut Self::eor),
         0x5E => self.lsr_absolute_x(),
         0x5F => self.absolute_x_cb("SRE", &mut Self::sre),
@@ -283,6 +287,7 @@ impl CPU {
         0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
         0x7A => self.nop(),
         0x7B => self.absolute_y_cb("RRA", &mut Self::rra),
+        0x7C => self.absolute_x_cb("TOP", &mut Self::top),
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         0x7E => self.ror_absolute_x(),
         0x7F => self.absolute_x_cb("RRA", &mut Self::rra),
@@ -312,7 +317,9 @@ impl CPU {
         0x98 => self.tya(),
         0x99 => self.sta_absolute_y(),
         0x9A => self.txs(),
+        0x9C => self.sya(),
         0x9D => self.sta_absolute_x(),
+        0x9E => self.sxa(),
         0x9F => self.axa_absolute_y(),
         0xA0 => self.immediate_cb("LDY", &mut Self::ldy),
         0xA1 => self.indexed_x_cb("LDA", &mut Self::lda),
@@ -374,6 +381,7 @@ impl CPU {
         0xD9 => self.absolute_y_cb("CMP", &mut Self::cmp),
         0xDB => self.dcp_abs_y(),
         0xDA => self.nop(),
+        0xDC => self.absolute_x_cb("TOP", &mut Self::top),
         0xDD => self.absolute_x_cb("CMP", &mut Self::cmp),
         0xDE => self.dec_abs_x(),
         0xDF => self.dcp_abs_x(),
@@ -405,6 +413,7 @@ impl CPU {
         0xF9 => self.absolute_y_cb("SBC", &mut Self::sbc),
         0xFA => self.nop(),
         0xFB => self.absolute_y_cb("ISC", &mut Self::isc),
+        0xFC => self.absolute_x_cb("TOP", &mut Self::top),
         0xFD => self.absolute_x_cb("SBC", &mut Self::sbc),
         0xFE => self.inc_abs_x(),
         0xFF => self.absolute_x_cb("ISC", &mut Self::isc),
@@ -1572,6 +1581,35 @@ impl CPU {
   pub fn sta_indexed_y(&mut self) {
     let (index, _) = self.indexed_y("STA");
     self.set_u16(index, self.accumulator.get());
+  }
+
+  /// Illegal opcode.
+  /// AND X register with the high byte of the target address of the
+  /// argument + 1. Result stored in memory.
+  pub fn sxa(&mut self) {
+    warn!("SXA called. Something might be borked");
+    let ops = self.get_two_operands();
+    let result = (self.x_register.get() & ops[1]).wrapping_add(1);
+    let index = u16::from_le_bytes(ops);
+    self.set_u16(index, result);
+  }
+
+  /// Illegal opcode.
+  /// AND Y register with the high byte of the target address of the
+  /// argument + 1. Result stored in memory.
+  pub fn sya(&mut self) {
+    warn!("SYA called. Something might be borked");
+    let ops = self.get_two_operands();
+    let result = (self.y_register.get() & ops[1]).wrapping_add(1);
+    let index = u16::from_le_bytes(ops);
+    self.set_u16(index, result);
+  }
+
+  /// Illegal opcode
+  /// Nop.
+  pub fn top(&mut self, _: u8) {
+    warn!("TOP called. Something might be borked");
+    self.nop();
   }
 
   pub fn txs(&mut self) {
