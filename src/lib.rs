@@ -290,9 +290,11 @@ impl CPU {
         0xBE => self.absolute_y_cb("LDX", &mut Self::ldx),
         0xC0 => self.immediate_cb("CPY", &mut Self::cpy),
         0xC1 => self.indexed_x_cb("CMP", &mut Self::cmp),
+        0xC3 => self.dcp_indexed_x(),
         0xC4 => self.zero_page_cb("CPY", &mut Self::cpy),
         0xC5 => self.zero_page_cb("CMP", &mut Self::cmp),
         0xC6 => self.dec_zp(),
+        0xC7 => self.dcp_zp(),
         0xC8 => self.iny(),
         0xC9 => self.immediate_cb("CMP", &mut Self::cmp),
         0xCA => self.dex(),
@@ -300,14 +302,19 @@ impl CPU {
         0xCC => self.absolute_cb("CPY", &mut Self::cpy),
         0xCD => self.absolute_cb("CMP", &mut Self::cmp),
         0xCE => self.dec_abs(),
+        0xCF => self.dcp_absolute(),
         0xD0 => self.bne(),
         0xD1 => self.indexed_y_cb("CMP", &mut Self::cmp),
+        0xD3 => self.dcp_indexed_y(),
         0xD5 => self.zp_reg_cb("CMP", self.x_register.get(), &mut Self::cmp),
         0xD6 => self.dec_zp_reg(),
+        0xD7 => self.dcp_zp_reg(),
         0xD8 => self.cld(),
         0xD9 => self.absolute_y_cb("CMP", &mut Self::cmp),
+        0xDB => self.dcp_abs_y(),
         0xDD => self.absolute_x_cb("CMP", &mut Self::cmp),
         0xDE => self.dec_abs_x(),
+        0xDF => self.dcp_abs_x(),
         0xE0 => self.immediate_cb("CPX", &mut Self::cpx),
         0xE1 => self.indexed_x_cb("SBC", &mut Self::sbc),
         0xE4 => self.zero_page_cb("CPX", &mut Self::cpx),
@@ -612,7 +619,8 @@ impl CPU {
   ============================================================================================
   */
 
-  /// Illegal opcode. Two opcode values reference this, both are immediate mode.
+  /// Illegal opcode.
+  /// Two opcode values reference this, both are immediate mode.
   ///
   /// Affects flags N Z C. Carry is set if result is negative
   pub fn aac(&mut self, value: u8) {
@@ -626,7 +634,8 @@ impl CPU {
       .handle_c_flag(message, self.status_register.is_negative_bit_set());
   }
 
-  /// Illegal opcode. And x register with accumulator and store result in memory.
+  /// Illegal opcode.
+  /// And x register with accumulator and store result in memory.
   /// Four possible codes, zero page, zero page y, indirect x, and absolute
   ///
   /// Affects flags N, Z
@@ -692,7 +701,8 @@ impl CPU {
     self.status_register.handle_z_flag(result, message);
   }
 
-  /// Illegal opcode. And operand with accumulator, then rotate one bit right, then
+  /// Illegal opcode.
+  /// And operand with accumulator, then rotate one bit right, then
   /// check bits 5 and 6.
   ///
   /// Affects flags N V Z C
@@ -768,7 +778,8 @@ impl CPU {
     self.sync();
   }
 
-  /// Illegal opcode. AND byte with accumulator, then shift right one bit
+  /// Illegal opcode.
+  /// AND byte with accumulator, then shift right one bit
   /// in accumulator
   ///
   /// Affects flags N Z C
@@ -782,7 +793,8 @@ impl CPU {
     self.status_register.handle_z_flag(result, message);
   }
 
-  /// Illegal opcode. AND byte with accumulator, then transfer accumulator to X register.
+  /// Illegal opcode.
+  /// AND byte with accumulator, then transfer accumulator to X register.
   ///
   /// Affects flags N Z
   pub fn atx(&mut self, value: u8) {
@@ -795,7 +807,8 @@ impl CPU {
     self.status_register.handle_z_flag(result, message);
   }
 
-  /// Illegal opcode. AND X register with accumulator then AND result with 7
+  /// Illegal opcode.
+  /// AND X register with accumulator then AND result with 7
   /// and store in memory
   /// Affects no flags
   pub fn axa(&mut self, index: u16) {
@@ -929,6 +942,53 @@ impl CPU {
     self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
   }
 
+  /// Illegal opcode.
+  /// Subtract 1 from memory (without borrow)
+  ///
+  /// Affects flags C
+  pub fn dcp(&mut self, index: u16, value: u8) {
+    let message = "DCP";
+    warn!("{} called. Something might be borked.", message);
+    let (result, carry) = value.overflowing_sub(1);
+    self.status_register.handle_c_flag(message, carry);
+    self.set_u16(index, result);
+  }
+
+  pub fn dcp_zp(&mut self) {
+    let (index, value) = self.zero_page("DCP");
+    self.dcp(index as u16, value);
+  }
+
+  pub fn dcp_zp_reg(&mut self) {
+    let (index, value) = self.zp_reg("DEC", self.x_register.get());
+    self.dcp(index as u16, value);
+  }
+
+  pub fn dcp_absolute(&mut self) {
+    let (index, value) = self.absolute("DEC");
+    self.dcp(index, value);
+  }
+
+  pub fn dcp_abs_x(&mut self) {
+    let (index, value) = self.absolute_reg("DCP", self.x_register.get());
+    self.dcp(index, value);
+  }
+
+  pub fn dcp_abs_y(&mut self) {
+    let (index, value) = self.absolute_reg("DCP", self.y_register.get());
+    self.dcp(index, value);
+  }
+
+  pub fn dcp_indexed_x(&mut self) {
+    let (index, value) = self.indexed_x("DCP");
+    self.dcp(index, value);
+  }
+
+  pub fn dcp_indexed_y(&mut self) {
+    let (index, value) = self.indexed_y("DCP");
+    self.dcp(index, value);
+  }
+
   pub fn dec(&mut self, index: u16, value: u8) {
     let value = value.wrapping_sub(1);
     // extra cycle for modification
@@ -956,7 +1016,7 @@ impl CPU {
 
   pub fn dec_abs_x(&mut self) {
     let (index, value) = self.absolute_reg("DEC", self.x_register.get());
-    self.dec(index as u16, value);
+    self.dec(index, value);
     // extra cycle. do not know why
     self.sync();
   }
