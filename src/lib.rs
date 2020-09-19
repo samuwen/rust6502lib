@@ -296,6 +296,7 @@ impl CPU {
         0xC8 => self.iny(),
         0xC9 => self.immediate_cb("CMP", &mut Self::cmp),
         0xCA => self.dex(),
+        0xCB => self.immediate_cb("AXS", &mut Self::axs),
         0xCC => self.absolute_cb("CPY", &mut Self::cpy),
         0xCD => self.absolute_cb("CMP", &mut Self::cmp),
         0xCE => self.dec_abs(),
@@ -808,7 +809,7 @@ impl CPU {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     let reg = self.y_register.get();
-    let total = index.wrapping_add(reg as u16);
+    let index = index.wrapping_add(reg as u16);
     self.test_for_overflow(ops[1], reg);
     self.axa(index);
   }
@@ -820,6 +821,22 @@ impl CPU {
     let hi = self.get_zero_page(modified_op.wrapping_add(1));
     let index = u16::from_le_bytes([lo, hi]);
     self.axa(index);
+  }
+
+  /// Illegal opcode.
+  /// AND x register with accumulator and store result in x register.
+  /// Then subtract byte from x register (no borrow)
+  ///
+  /// Affects flags N Z C
+  pub fn axs(&mut self, value: u8) {
+    let message = "AXS";
+    warn!("{} called. Something might be borked.", message);
+    let result = self.x_register.get() & self.accumulator.get();
+    let (result, carry) = result.overflowing_sub(value);
+    self.x_register.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_c_flag(message, carry);
   }
 
   /// Tests a value and sets flags accordingly.
