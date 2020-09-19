@@ -330,24 +330,31 @@ impl CPU {
         0xE0 => self.immediate_cb("CPX", &mut Self::cpx),
         0xE1 => self.indexed_x_cb("SBC", &mut Self::sbc),
         0xE2 => self.immediate_cb("DOP", &mut Self::dop),
+        0xE3 => self.indexed_x_cb("ISC", &mut Self::isc),
         0xE4 => self.zero_page_cb("CPX", &mut Self::cpx),
         0xE5 => self.zero_page_cb("SBC", &mut Self::sbc),
         0xE6 => self.inc_zp(),
+        0xE7 => self.zero_page_cb("ISC", &mut Self::isc),
         0xE8 => self.inx(),
         0xE9 => self.immediate_cb("SBC", &mut Self::sbc),
         0xEA => self.nop(),
         0xEC => self.absolute_cb("CPX", &mut Self::cpx),
         0xED => self.absolute_cb("SBC", &mut Self::sbc),
         0xEE => self.inc_abs(),
+        0xEF => self.absolute_cb("ISC", &mut Self::isc),
         0xF0 => self.beq(),
         0xF1 => self.indexed_y_cb("SBC", &mut Self::sbc),
+        0xF3 => self.indexed_y_cb("ISC", &mut Self::isc),
         0xF4 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0xF5 => self.zp_reg_cb("SBC", self.x_register.get(), &mut Self::sbc),
         0xF6 => self.inc_zp_reg(),
+        0xF7 => self.zp_reg_cb("ISC", self.x_register.get(), &mut Self::isc),
         0xF8 => self.sed(),
         0xF9 => self.absolute_y_cb("SBC", &mut Self::sbc),
+        0xFB => self.absolute_y_cb("ISC", &mut Self::isc),
         0xFD => self.absolute_x_cb("SBC", &mut Self::sbc),
         0xFE => self.inc_abs_x(),
+        0xFF => self.absolute_x_cb("ISC", &mut Self::isc),
         _ => (),
       }
     }
@@ -1082,6 +1089,22 @@ impl CPU {
     self.inc(index as u16, value);
     // extra cycle. do not know why
     self.sync();
+  }
+
+  /// Illegal opcode.
+  /// Increase memory by one, then subtract memory from accu-mulator (with borrow)
+  ///
+  /// Affects flags N V Z C
+  pub fn isc(&mut self, value: u8) {
+    let message = "ISC";
+    warn!("{} called. Something might be borked", message);
+    let result = value.wrapping_add(1);
+    let (result, carry) = self.accumulator.get().overflowing_sub(result);
+    self.accumulator.set(result);
+    self.status_register.handle_c_flag(message, carry);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_v_flag(result, message, carry);
+    self.status_register.handle_z_flag(result, message);
   }
 
   pub fn jmp_absolute(&mut self) {
