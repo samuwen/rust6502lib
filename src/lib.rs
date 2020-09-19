@@ -166,6 +166,7 @@ impl CPU {
       match opcode {
         0x00 => self.brk(),
         0x01 => self.indexed_x_cb("ORA", &mut Self::ora),
+        0x02 => self.kil(),
         0x04 => self.zero_page_cb("DOP", &mut Self::dop),
         0x05 => self.zero_page_cb("ORA", &mut Self::ora),
         0x06 => self.asl_zero_page(),
@@ -177,15 +178,18 @@ impl CPU {
         0x0E => self.asl_absolute(),
         0x10 => self.bpl(),
         0x11 => self.indexed_y_cb("ORA", &mut Self::ora),
+        0x12 => self.kil(),
         0x14 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x15 => self.zp_reg_cb("ORA", self.x_register.get(), &mut Self::ora),
         0x16 => self.asl_zero_page_x(),
         0x18 => self.clc(),
         0x19 => self.absolute_y_cb("ORA", &mut Self::ora),
+        0x1A => self.nop(),
         0x1D => self.absolute_x_cb("ORA", &mut Self::ora),
         0x1E => self.asl_absolute_x(),
         0x20 => self.jsr(),
         0x21 => self.indexed_x_cb("AND", &mut Self::and),
+        0x22 => self.kil(),
         0x24 => self.zero_page_cb("BIT", &mut Self::bit),
         0x25 => self.zero_page_cb("AND", &mut Self::and),
         0x26 => self.rol_zero_page(),
@@ -198,15 +202,18 @@ impl CPU {
         0x2E => self.rol_absolute(),
         0x30 => self.bmi(),
         0x31 => self.indexed_y_cb("AND", &mut Self::and),
+        0x32 => self.kil(),
         0x34 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x35 => self.zp_reg_cb("AND", self.x_register.get(), &mut Self::and),
         0x36 => self.rol_zero_page_x(),
         0x38 => self.sec(),
         0x39 => self.absolute_y_cb("AND", &mut Self::and),
+        0x3A => self.nop(),
         0x3D => self.absolute_x_cb("AND", &mut Self::and),
         0x3E => self.rol_absolute_x(),
         0x40 => self.rti(),
         0x41 => self.indexed_x_cb("EOR", &mut Self::eor),
+        0x42 => self.kil(),
         0x44 => self.zero_page_cb("DOP", &mut Self::dop),
         0x45 => self.zero_page_cb("EOR", &mut Self::eor),
         0x46 => self.lsr_zero_page(),
@@ -219,15 +226,18 @@ impl CPU {
         0x4E => self.lsr_absolute(),
         0x50 => self.bvc(),
         0x51 => self.indexed_y_cb("EOR", &mut Self::eor),
+        0x52 => self.kil(),
         0x54 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x55 => self.zp_reg_cb("EOR", self.x_register.get(), &mut Self::eor),
         0x56 => self.lsr_zero_page_x(),
         0x58 => self.cli(),
         0x59 => self.absolute_y_cb("EOR", &mut Self::eor),
+        0x5A => self.nop(),
         0x5D => self.absolute_x_cb("EOR", &mut Self::eor),
         0x5E => self.lsr_absolute_x(),
         0x60 => self.rts(),
         0x61 => self.indexed_x_cb("ADC", &mut Self::adc),
+        0x62 => self.kil(),
         0x64 => self.zero_page_cb("DOP", &mut Self::dop),
         0x65 => self.zero_page_cb("ADC", &mut Self::adc),
         0x66 => self.ror_zero_page(),
@@ -240,11 +250,13 @@ impl CPU {
         0x6E => self.ror_absolute(),
         0x70 => self.bvs(),
         0x71 => self.indexed_y_cb("ADC", &mut Self::adc),
+        0x72 => self.kil(),
         0x74 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x75 => self.zp_reg_cb("ADC", self.x_register.get(), &mut Self::adc),
         0x76 => self.ror_zero_page_x(),
         0x78 => self.sei(),
         0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
+        0x7A => self.nop(),
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         0x7E => self.ror_absolute_x(),
         0x80 => self.immediate_cb("DOP", &mut Self::dop),
@@ -264,6 +276,7 @@ impl CPU {
         0x8F => self.aax_absolute(),
         0x90 => self.bcc(),
         0x91 => self.sta_indexed_y(),
+        0x92 => self.kil(),
         0x93 => self.axa_indirect(),
         0x94 => self.sty_zero_page_x(),
         0x95 => self.sta_zero_page_x(),
@@ -277,8 +290,10 @@ impl CPU {
         0xA0 => self.immediate_cb("LDY", &mut Self::ldy),
         0xA1 => self.indexed_x_cb("LDA", &mut Self::lda),
         0xA2 => self.immediate_cb("LDX", &mut Self::ldx),
+        0xA3 => self.indexed_x_cb("LAX", &mut Self::lax),
         0xA4 => self.zero_page_cb("LDY", &mut Self::ldx),
         0xA5 => self.zero_page_cb("LDA", &mut Self::lda),
+        0xA7 => self.zero_page_cb("LAX", &mut Self::lax),
         0xA6 => self.zero_page_cb("LDX", &mut Self::ldx),
         0xA8 => self.tay(),
         0xA9 => self.immediate_cb("LDA", &mut Self::lda),
@@ -287,17 +302,23 @@ impl CPU {
         0xAC => self.absolute_cb("LDY", &mut Self::ldy),
         0xAD => self.absolute_cb("LDA", &mut Self::lda),
         0xAE => self.absolute_cb("LDX", &mut Self::ldx),
+        0xAF => self.absolute_cb("LAX", &mut Self::lax),
         0xB0 => self.bcs(),
         0xB1 => self.indexed_y_cb("LDA", &mut Self::lda),
+        0xB2 => self.kil(),
+        0xB3 => self.indexed_y_cb("LAX", &mut Self::lax),
         0xB8 => self.clv(),
         0xB4 => self.zp_reg_cb("LDY", self.x_register.get(), &mut Self::ldy),
         0xB5 => self.zp_reg_cb("LDA", self.x_register.get(), &mut Self::lda),
         0xB6 => self.zp_reg_cb("LDX", self.y_register.get(), &mut Self::ldx),
+        0xB7 => self.zp_reg_cb("LAX", self.y_register.get(), &mut Self::lax),
         0xB9 => self.absolute_y_cb("LDA", &mut Self::lda),
         0xBA => self.tsx(),
+        0xBB => self.absolute_y_cb("LAR", &mut Self::lar),
         0xBC => self.absolute_x_cb("LDY", &mut Self::ldy),
         0xBD => self.absolute_x_cb("LDA", &mut Self::lda),
         0xBE => self.absolute_y_cb("LDX", &mut Self::ldx),
+        0xBF => self.absolute_y_cb("LAX", &mut Self::lax),
         0xC0 => self.immediate_cb("CPY", &mut Self::cpy),
         0xC1 => self.indexed_x_cb("CMP", &mut Self::cmp),
         0xC2 => self.immediate_cb("DOP", &mut Self::dop),
@@ -316,6 +337,7 @@ impl CPU {
         0xCF => self.dcp_absolute(),
         0xD0 => self.bne(),
         0xD1 => self.indexed_y_cb("CMP", &mut Self::cmp),
+        0xD2 => self.kil(),
         0xD3 => self.dcp_indexed_y(),
         0xD4 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0xD5 => self.zp_reg_cb("CMP", self.x_register.get(), &mut Self::cmp),
@@ -324,6 +346,7 @@ impl CPU {
         0xD8 => self.cld(),
         0xD9 => self.absolute_y_cb("CMP", &mut Self::cmp),
         0xDB => self.dcp_abs_y(),
+        0xDA => self.nop(),
         0xDD => self.absolute_x_cb("CMP", &mut Self::cmp),
         0xDE => self.dec_abs_x(),
         0xDF => self.dcp_abs_x(),
@@ -344,6 +367,7 @@ impl CPU {
         0xEF => self.absolute_cb("ISC", &mut Self::isc),
         0xF0 => self.beq(),
         0xF1 => self.indexed_y_cb("SBC", &mut Self::sbc),
+        0xF2 => self.kil(),
         0xF3 => self.indexed_y_cb("ISC", &mut Self::isc),
         0xF4 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0xF5 => self.zp_reg_cb("SBC", self.x_register.get(), &mut Self::sbc),
@@ -351,6 +375,7 @@ impl CPU {
         0xF7 => self.zp_reg_cb("ISC", self.x_register.get(), &mut Self::isc),
         0xF8 => self.sed(),
         0xF9 => self.absolute_y_cb("SBC", &mut Self::sbc),
+        0xFA => self.nop(),
         0xFB => self.absolute_y_cb("ISC", &mut Self::isc),
         0xFD => self.absolute_x_cb("SBC", &mut Self::sbc),
         0xFE => self.inc_abs_x(),
@@ -1107,6 +1132,12 @@ impl CPU {
     self.status_register.handle_z_flag(result, message);
   }
 
+  /// Illegal opcode.
+  /// Locks the system, so we simulate by panic
+  pub fn kil(&self) {
+    panic!("KIL called. CPU is locked.");
+  }
+
   pub fn jmp_absolute(&mut self) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
@@ -1138,6 +1169,35 @@ impl CPU {
     // extra cycle needed due the return address
     self.sync();
     self.program_counter.jump(index);
+  }
+
+  /// Illegal opcode.
+  /// AND memory with stack pointer, transfer result to accumulator,
+  /// X register and stack pointer.
+  ///
+  /// Affects flags N Z
+  pub fn lar(&mut self, value: u8) {
+    let message = "LAR";
+    warn!("{} called. Something might be borked.", message);
+    let result = value & self.memory.get_stack_pointer().get();
+    self.accumulator.set(result);
+    self.x_register.set(result);
+    self.memory.set_stack_pointer(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  /// Illegal opcode.
+  /// Load accumulator and X register with memory.
+  ///
+  /// Affects flags N Z
+  pub fn lax(&mut self, value: u8) {
+    let message = "LAX";
+    warn!("{} called. Something might be borked.", message);
+    self.accumulator.set(value);
+    self.x_register.set(value);
+    self.status_register.handle_n_flag(value, message);
+    self.status_register.handle_z_flag(value, message);
   }
 
   /// Loads the accumulator with the value given
