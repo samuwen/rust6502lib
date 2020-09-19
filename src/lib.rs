@@ -209,6 +209,7 @@ impl CPU {
         0x48 => self.pha(),
         0x49 => self.immediate_cb("EOR", &mut Self::eor),
         0x4A => self.lsr_accumulator(),
+        0x4B => self.immediate_cb("ASR", &mut Self::asr),
         0x4C => self.jmp_absolute(),
         0x4D => self.absolute_cb("EOR", &mut Self::eor),
         0x4E => self.lsr_absolute(),
@@ -253,6 +254,7 @@ impl CPU {
         0x8F => self.aax_absolute(),
         0x90 => self.bcc(),
         0x91 => self.sta_indexed_y(),
+        0x93 => self.axa_indirect(),
         0x94 => self.sty_zero_page_x(),
         0x95 => self.sta_zero_page_x(),
         0x96 => self.stx_zero_page_y(),
@@ -261,6 +263,7 @@ impl CPU {
         0x99 => self.sta_absolute_y(),
         0x9A => self.txs(),
         0x9D => self.sta_absolute_x(),
+        0x9F => self.axa_absolute_y(),
         0xA0 => self.immediate_cb("LDY", &mut Self::ldy),
         0xA1 => self.indexed_x_cb("LDA", &mut Self::lda),
         0xA2 => self.immediate_cb("LDX", &mut Self::ldx),
@@ -270,6 +273,7 @@ impl CPU {
         0xA8 => self.tay(),
         0xA9 => self.immediate_cb("LDA", &mut Self::lda),
         0xAA => self.tax(),
+        0xAB => self.immediate_cb("ATX", &mut Self::atx),
         0xAC => self.absolute_cb("LDY", &mut Self::ldy),
         0xAD => self.absolute_cb("LDA", &mut Self::lda),
         0xAE => self.absolute_cb("LDX", &mut Self::ldx),
@@ -513,10 +517,18 @@ impl CPU {
     if self.status_register.is_carry_bit_set() {
       result |= 0x80;
     }
-    if value & 0x1 == 1 {
-      self.status_register.set_carry_bit();
-    } else {
-      self.status_register.clear_carry_bit();
+    match value & 0x1 == 1 {
+      true => self.status_register.set_carry_bit(),
+      false => self.status_register.clear_carry_bit(),
+    }
+    result
+  }
+
+  fn shift_right(&mut self, value: u8) -> u8 {
+    let result = value.wrapping_shr(1);
+    match value & 0x1 == 1 {
+      true => self.status_register.set_carry_bit(),
+      false => self.status_register.clear_carry_bit(),
     }
     result
   }
@@ -526,10 +538,18 @@ impl CPU {
     if self.status_register.is_carry_bit_set() {
       result |= 0x1;
     }
-    if value & 0x80 == 0x80 {
-      self.status_register.set_carry_bit();
-    } else {
-      self.status_register.clear_carry_bit();
+    match value & 0x80 == 0x80 {
+      true => self.status_register.set_carry_bit(),
+      false => self.status_register.clear_carry_bit(),
+    }
+    result
+  }
+
+  fn shift_left(&mut self, value: u8) -> u8 {
+    let result = value.wrapping_shl(1);
+    match value & 0x80 == 0x80 {
+      true => self.status_register.set_carry_bit(),
+      false => self.status_register.clear_carry_bit(),
     }
     result
   }
@@ -638,35 +658,6 @@ impl CPU {
     self.aax(index);
   }
 
-  /// Illegal opcode. And operand with accumulator, then rotate one bit right, then
-  /// check bits 5 and 6.
-  ///
-  /// Affects flags N V Z C
-  pub fn arr(&mut self, value: u8) {
-    let message = "ARR";
-    warn!("{} called. Something might be borked.", message);
-    let result = self.accumulator.get() & value;
-    let result = self.rotate_right(result);
-    self.accumulator.set(result);
-    let b5 = (result & 0x20) >> 5;
-    let b6 = (result & 0x40) >> 6;
-    if b5 == 1 && b6 == 1 {
-      self.status_register.set_carry_bit();
-      self.status_register.clear_overflow_bit();
-    } else if b5 == 0 && b6 == 0 {
-      self.status_register.clear_carry_bit();
-      self.status_register.clear_overflow_bit();
-    } else if b5 == 1 && b6 == 0 {
-      self.status_register.set_overflow_bit();
-      self.status_register.clear_carry_bit();
-    } else {
-      self.status_register.set_overflow_bit();
-      self.status_register.set_carry_bit();
-    }
-    self.status_register.handle_z_flag(result, message);
-    self.status_register.handle_n_flag(result, message);
-  }
-
   /// Adds the value given to the accumulator
   ///
   /// Affects flags N V Z C
@@ -698,6 +689,35 @@ impl CPU {
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
+  }
+
+  /// Illegal opcode. And operand with accumulator, then rotate one bit right, then
+  /// check bits 5 and 6.
+  ///
+  /// Affects flags N V Z C
+  pub fn arr(&mut self, value: u8) {
+    let message = "ARR";
+    warn!("{} called. Something might be borked.", message);
+    let result = self.accumulator.get() & value;
+    let result = self.rotate_right(result);
+    self.accumulator.set(result);
+    let b5 = (result & 0x20) >> 5;
+    let b6 = (result & 0x40) >> 6;
+    if b5 == 1 && b6 == 1 {
+      self.status_register.set_carry_bit();
+      self.status_register.clear_overflow_bit();
+    } else if b5 == 0 && b6 == 0 {
+      self.status_register.clear_carry_bit();
+      self.status_register.clear_overflow_bit();
+    } else if b5 == 1 && b6 == 0 {
+      self.status_register.set_overflow_bit();
+      self.status_register.clear_carry_bit();
+    } else {
+      self.status_register.set_overflow_bit();
+      self.status_register.set_carry_bit();
+    }
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_n_flag(result, message);
   }
 
   /// Shifts all bits left one position for the applied location
@@ -745,6 +765,61 @@ impl CPU {
     self.set_u16(index, result);
     // extra cycle. do not know from where
     self.sync();
+  }
+
+  /// Illegal opcode. AND byte with accumulator, then shift right one bit
+  /// in accumulator
+  ///
+  /// Affects flags N Z C
+  pub fn asr(&mut self, value: u8) {
+    let message = "ASR";
+    warn!("{} called. Something might be borked.", message);
+    let result = self.accumulator.get() & value;
+    let result = self.shift_right(result);
+    self.accumulator.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  /// Illegal opcode. AND byte with accumulator, then transfer accumulator to X register.
+  ///
+  /// Affects flags N Z
+  pub fn atx(&mut self, value: u8) {
+    let message = "ATX";
+    warn!("{} called. Something might be borked.", message);
+    let result = self.accumulator.get() & value;
+    self.accumulator.set(result);
+    self.x_register.set(result);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
+  /// Illegal opcode. AND X register with accumulator then AND result with 7
+  /// and store in memory
+  /// Affects no flags
+  pub fn axa(&mut self, index: u16) {
+    warn!("AXA called. Something might be borked.");
+    let result = self.accumulator.get() & self.x_register.get();
+    let result = result & 7;
+    self.set_u16(index, result);
+  }
+
+  pub fn axa_absolute_y(&mut self) {
+    let ops = self.get_two_operands();
+    let index = u16::from_le_bytes(ops);
+    let reg = self.y_register.get();
+    let total = index.wrapping_add(reg as u16);
+    self.test_for_overflow(ops[1], reg);
+    self.axa(index);
+  }
+
+  pub fn axa_indirect(&mut self) {
+    let op = self.get_single_operand();
+    let modified_op = op.wrapping_add(self.x_register.get());
+    let lo = self.get_zero_page(modified_op);
+    let hi = self.get_zero_page(modified_op.wrapping_add(1));
+    let index = u16::from_le_bytes([lo, hi]);
+    self.axa(index);
   }
 
   /// Tests a value and sets flags accordingly.
