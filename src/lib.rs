@@ -255,6 +255,7 @@ impl CPU {
         0x58 => self.cli(),
         0x59 => self.absolute_y_cb("EOR", &mut Self::eor),
         0x5A => self.nop(),
+        0x5B => self.absolute_y_cb("SRE", &mut Self::sre),
         0x5C => self.absolute_x_cb("TOP", &mut Self::top),
         0x5D => self.absolute_x_cb("EOR", &mut Self::eor),
         0x5E => self.lsr_absolute_x(),
@@ -302,6 +303,7 @@ impl CPU {
         0x88 => self.dey(),
         0x89 => self.immediate_cb("DOP", &mut Self::dop),
         0x8A => self.txa(),
+        0x8B => self.xaa(),
         0x8C => self.sty_absolute(),
         0x8D => self.sta_absolute(),
         0x8E => self.stx_absolute(),
@@ -317,6 +319,7 @@ impl CPU {
         0x98 => self.tya(),
         0x99 => self.sta_absolute_y(),
         0x9A => self.txs(),
+        0x9B => self.xas(),
         0x9C => self.sya(),
         0x9D => self.sta_absolute_x(),
         0x9E => self.sxa(),
@@ -417,7 +420,6 @@ impl CPU {
         0xFD => self.absolute_x_cb("SBC", &mut Self::sbc),
         0xFE => self.inc_abs_x(),
         0xFF => self.absolute_x_cb("ISC", &mut Self::isc),
-        _ => (),
       }
     }
   }
@@ -1678,6 +1680,29 @@ impl CPU {
   pub fn sty_absolute(&mut self) {
     let index = self.absolute_index("STY");
     self.memory.set(index, self.y_register.get());
+  }
+
+  /// Illegal opcode.
+  /// Panics as there is no definition of how this behaves.
+  pub fn xaa(&mut self) {
+    panic!("XAA called. Undefined and unknown behavior");
+  }
+
+  /// Illegal opcode.
+  /// AND X register with accumulator and store result in stack pointer, then
+  /// AND stack pointer with the high byte of the target address of the
+  /// argument + 1. Store result in memory.
+  ///
+  /// Programmers note: WTF is this?!
+  pub fn xas(&mut self) {
+    let message = "XAS";
+    warn!("{} called. Something might be borked", message);
+    let result = self.x_register.get() & self.accumulator.get();
+    self.memory.set_stack_pointer(result);
+    let ops = self.get_two_operands();
+    let result = (result & ops[1]) + 1;
+    let index = u16::from_le_bytes(ops);
+    self.set_u16(index, result);
   }
 }
 
