@@ -167,32 +167,41 @@ impl CPU {
         0x00 => self.brk(),
         0x01 => self.indexed_x_cb("ORA", &mut Self::ora),
         0x02 => self.kil(),
+        0x03 => self.indexed_x_cb("SLO", &mut Self::slo),
         0x04 => self.zero_page_cb("DOP", &mut Self::dop),
         0x05 => self.zero_page_cb("ORA", &mut Self::ora),
         0x06 => self.asl_zero_page(),
+        0x07 => self.zero_page_cb("SLO", &mut Self::slo),
         0x08 => self.php(),
         0x09 => self.immediate_cb("ORA", &mut Self::ora),
         0x0A => self.asl_accumulator(),
         0x0B => self.immediate_cb("AAC", &mut Self::aac),
         0x0D => self.absolute_cb("ORA", &mut Self::ora),
         0x0E => self.asl_absolute(),
+        0x0F => self.absolute_cb("SLO", &mut Self::slo),
         0x10 => self.bpl(),
         0x11 => self.indexed_y_cb("ORA", &mut Self::ora),
         0x12 => self.kil(),
+        0x13 => self.indexed_y_cb("SLO", &mut Self::slo),
         0x14 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x15 => self.zp_reg_cb("ORA", self.x_register.get(), &mut Self::ora),
         0x16 => self.asl_zero_page_x(),
+        0x17 => self.zp_reg_cb("SLO", self.x_register.get(), &mut Self::slo),
         0x18 => self.clc(),
         0x19 => self.absolute_y_cb("ORA", &mut Self::ora),
         0x1A => self.nop(),
+        0x1B => self.absolute_y_cb("SLO", &mut Self::slo),
         0x1D => self.absolute_x_cb("ORA", &mut Self::ora),
         0x1E => self.asl_absolute_x(),
+        0x1F => self.absolute_x_cb("SLO", &mut Self::slo),
         0x20 => self.jsr(),
         0x21 => self.indexed_x_cb("AND", &mut Self::and),
         0x22 => self.kil(),
+        0x23 => self.indexed_x_cb("RLA", &mut Self::rla),
         0x24 => self.zero_page_cb("BIT", &mut Self::bit),
         0x25 => self.zero_page_cb("AND", &mut Self::and),
         0x26 => self.rol_zero_page(),
+        0x27 => self.zero_page_cb("RLA", &mut Self::rla),
         0x28 => self.plp(),
         0x29 => self.immediate_cb("AND", &mut Self::and),
         0x2A => self.rol_accumulator(),
@@ -200,23 +209,30 @@ impl CPU {
         0x2C => self.absolute_cb("BIT", &mut Self::bit),
         0x2D => self.absolute_cb("AND", &mut Self::and),
         0x2E => self.rol_absolute(),
+        0x2F => self.absolute_cb("RLA", &mut Self::rla),
         0x30 => self.bmi(),
         0x31 => self.indexed_y_cb("AND", &mut Self::and),
         0x32 => self.kil(),
+        0x33 => self.indexed_y_cb("RLA", &mut Self::rla),
         0x34 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x35 => self.zp_reg_cb("AND", self.x_register.get(), &mut Self::and),
         0x36 => self.rol_zero_page_x(),
+        0x37 => self.zp_reg_cb("RLA", self.x_register.get(), &mut Self::rla),
         0x38 => self.sec(),
         0x39 => self.absolute_y_cb("AND", &mut Self::and),
         0x3A => self.nop(),
+        0x3B => self.absolute_y_cb("RLA", &mut Self::rla),
         0x3D => self.absolute_x_cb("AND", &mut Self::and),
         0x3E => self.rol_absolute_x(),
+        0x3F => self.absolute_x_cb("RLA", &mut Self::rla),
         0x40 => self.rti(),
         0x41 => self.indexed_x_cb("EOR", &mut Self::eor),
         0x42 => self.kil(),
+        0x43 => self.indexed_x_cb("SRE", &mut Self::sre),
         0x44 => self.zero_page_cb("DOP", &mut Self::dop),
         0x45 => self.zero_page_cb("EOR", &mut Self::eor),
         0x46 => self.lsr_zero_page(),
+        0x47 => self.zero_page_cb("SRE", &mut Self::sre),
         0x48 => self.pha(),
         0x49 => self.immediate_cb("EOR", &mut Self::eor),
         0x4A => self.lsr_accumulator(),
@@ -224,23 +240,29 @@ impl CPU {
         0x4C => self.jmp_absolute(),
         0x4D => self.absolute_cb("EOR", &mut Self::eor),
         0x4E => self.lsr_absolute(),
+        0x4F => self.absolute_cb("SRE", &mut Self::sre),
         0x50 => self.bvc(),
         0x51 => self.indexed_y_cb("EOR", &mut Self::eor),
         0x52 => self.kil(),
+        0x53 => self.indexed_y_cb("SRE", &mut Self::sre),
         0x54 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x55 => self.zp_reg_cb("EOR", self.x_register.get(), &mut Self::eor),
         0x56 => self.lsr_zero_page_x(),
+        0x57 => self.zp_reg_cb("SRE", self.x_register.get(), &mut Self::sre),
         0x58 => self.cli(),
         0x59 => self.absolute_y_cb("EOR", &mut Self::eor),
         0x5A => self.nop(),
         0x5D => self.absolute_x_cb("EOR", &mut Self::eor),
         0x5E => self.lsr_absolute_x(),
+        0x5F => self.absolute_x_cb("SRE", &mut Self::sre),
         0x60 => self.rts(),
         0x61 => self.indexed_x_cb("ADC", &mut Self::adc),
         0x62 => self.kil(),
+        0x63 => self.indexed_x_cb("RRA", &mut Self::rra),
         0x64 => self.zero_page_cb("DOP", &mut Self::dop),
         0x65 => self.zero_page_cb("ADC", &mut Self::adc),
         0x66 => self.ror_zero_page(),
+        0x67 => self.zero_page_cb("RRA", &mut Self::rra),
         0x68 => self.pla(),
         0x69 => self.immediate_cb("ADC", &mut Self::adc),
         0x6A => self.ror_accumulator(),
@@ -248,17 +270,22 @@ impl CPU {
         0x6C => self.jmp_indirect(),
         0x6D => self.absolute_cb("ADC", &mut Self::adc),
         0x6E => self.ror_absolute(),
+        0x6F => self.absolute_cb("RRA", &mut Self::rra),
         0x70 => self.bvs(),
         0x71 => self.indexed_y_cb("ADC", &mut Self::adc),
         0x72 => self.kil(),
+        0x73 => self.indexed_y_cb("RRA", &mut Self::rra),
         0x74 => self.zp_reg_cb("DOP", self.x_register.get(), &mut Self::dop),
         0x75 => self.zp_reg_cb("ADC", self.x_register.get(), &mut Self::adc),
         0x76 => self.ror_zero_page_x(),
+        0x77 => self.zp_reg_cb("RRA", self.x_register.get(), &mut Self::rra),
         0x78 => self.sei(),
         0x79 => self.absolute_x_cb("ADC", &mut Self::adc),
         0x7A => self.nop(),
+        0x7B => self.absolute_y_cb("RRA", &mut Self::rra),
         0x7D => self.absolute_y_cb("ADC", &mut Self::adc),
         0x7E => self.ror_absolute_x(),
+        0x7F => self.absolute_x_cb("RRA", &mut Self::rra),
         0x80 => self.immediate_cb("DOP", &mut Self::dop),
         0x81 => self.sta_indexed_x(),
         0x82 => self.immediate_cb("DOP", &mut Self::dop),
@@ -361,6 +388,7 @@ impl CPU {
         0xE8 => self.inx(),
         0xE9 => self.immediate_cb("SBC", &mut Self::sbc),
         0xEA => self.nop(),
+        0xEB => self.immediate_cb("SBC", &mut Self::sbc),
         0xEC => self.absolute_cb("CPX", &mut Self::cpx),
         0xED => self.absolute_cb("SBC", &mut Self::sbc),
         0xEE => self.inc_abs(),
@@ -1329,6 +1357,20 @@ impl CPU {
     self.register_operation(self.y_register.get(), "INY");
   }
 
+  /// Illegal opcode.
+  /// Rotate one bit left in memory, then AND accumulator with memory.
+  ///
+  /// Affects flags N Z C
+  pub fn rla(&mut self, value: u8) {
+    let message = "RLA";
+    warn!("{} called. Something might be borked", message);
+    let result = self.rotate_left(value);
+    let result = self.accumulator.get() & result;
+    self.accumulator.set(result);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_n_flag(result, message);
+  }
+
   fn rol(&mut self, value: u8) -> u8 {
     trace!("ROL called with value: {}", value);
     let result = self.rotate_left(value);
@@ -1407,6 +1449,29 @@ impl CPU {
     self.set_u16(index, result);
   }
 
+  /// Illegal opcode.
+  /// Rotate one bit right in memory, then add memory to accumulator (with
+  /// carry).
+
+  /// Affects flags N V Z C
+  pub fn rra(&mut self, value: u8) {
+    let message = "RRA";
+    warn!("{} called. Something might be borked", message);
+    let result = self.rotate_right(value);
+    let modifier = match self.status_register.is_carry_bit_set() {
+      true => 1,
+      false => 0,
+    };
+    let (result, c1) = result.overflowing_add(modifier);
+    let (result, c2) = self.accumulator.get().overflowing_add(result);
+    let carry = c1 || c2;
+    self.accumulator.set(result);
+    self.status_register.handle_c_flag(message, carry);
+    self.status_register.handle_v_flag(result, message, carry);
+    self.status_register.handle_n_flag(result, message);
+    self.status_register.handle_z_flag(result, message);
+  }
+
   /// Return from interrupt
   pub fn rti(&mut self) {
     self.return_from_interrupt();
@@ -1444,6 +1509,34 @@ impl CPU {
 
   pub fn sei(&mut self) {
     self.flag_operation("SEI", &mut StatusRegister::set_interrupt_bit);
+  }
+
+  /// Illegal opcode.
+  /// Shift left one bit in memory, then OR accumulator with memory
+  ///
+  /// Affects flags N Z C
+  pub fn slo(&mut self, value: u8) {
+    let message = "SLO";
+    warn!("{} called. Something might be borked", message);
+    let result = self.shift_left(value);
+    let result = self.accumulator.get() | result;
+    self.accumulator.set(result);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_n_flag(result, message);
+  }
+
+  /// Illegal opcode.
+  /// Shift right one bit in memory, then EOR accumulator with memory
+  ///
+  /// Affects flags N Z C
+  pub fn sre(&mut self, value: u8) {
+    let message = "SRE";
+    warn!("{} called. Something might be borked", message);
+    let result = self.shift_right(value);
+    let result = self.accumulator.get() ^ result;
+    self.accumulator.set(result);
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_n_flag(result, message);
   }
 
   pub fn sta_zero_page(&mut self) {
