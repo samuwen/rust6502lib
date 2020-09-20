@@ -1,6 +1,9 @@
 use log::trace;
 use std::fmt::{Display, Formatter};
 
+/// Hey we're in binary!
+const BASE: u8 = 2;
+
 /// A 6502 status register with bitmasking implementation.
 ///
 /// # Examples
@@ -43,28 +46,31 @@ impl StatusRegister {
 
   /// Handles setting the bitmasked flag.
   fn set_status_register(&mut self, bit: StatusBit) {
-    self.0 |= BASE.pow(bit.into())
+    self.0 |= BASE.pow(bit as u32)
   }
 
   /// Handles checking the bitmask for specific flags.
   fn is_bit_set(&self, bit: StatusBit) -> bool {
-    let value = bit.into();
+    let value = bit as u32;
     (self.0 & (BASE.pow(value))) >> value == 1
   }
 
   /// Handles clearing the bitmasked flag
   fn unset_status_register(&mut self, bit: StatusBit) {
-    self.0 &= !BASE.pow(bit.into());
+    self.0 &= !BASE.pow(bit as u32);
   }
 
+  /// Takes in a flag enum and sets that flag to true
   pub fn set_flag(&mut self, flag: StatusBit) {
     self.set_status_register(flag);
   }
 
+  /// Takes in a flag enum and checks if that flag is true
   pub fn is_flag_set(&self, flag: StatusBit) -> bool {
     self.is_bit_set(flag)
   }
 
+  /// Takes in a flag enum and sets that flag to false
   pub fn clear_flag(&mut self, flag: StatusBit) {
     self.unset_status_register(flag);
   }
@@ -117,6 +123,7 @@ impl StatusRegister {
   }
 }
 
+/// Displays a readable set of info about the state of each flag
 impl Display for StatusRegister {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     let c = self.is_flag_set(StatusBit::Carry);
@@ -135,6 +142,9 @@ impl Display for StatusRegister {
 }
 
 // To ensure accuracy in our bit location we have a fake Unused bit that doesn't get used anywhere.
+
+/// Enum representing both the types of flags used and also the mask locations. IE on the 6502
+/// the Carry bit is in the 0 position, so it is here as well.
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum StatusBit {
@@ -147,14 +157,6 @@ pub enum StatusBit {
   Overflow,
   Negative,
 }
-
-impl StatusBit {
-  fn into(self) -> u32 {
-    self as u32
-  }
-}
-
-const BASE: u8 = 2;
 
 #[cfg(test)]
 mod tests {
