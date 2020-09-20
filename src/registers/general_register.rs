@@ -1,30 +1,28 @@
-pub struct GeneralRegister {
-  value: u8,
-}
+pub struct GeneralRegister(u8);
 
 impl GeneralRegister {
   pub fn new() -> GeneralRegister {
-    GeneralRegister { value: 0 }
+    GeneralRegister(0)
   }
 
   pub fn reset(&mut self) {
-    self.value = 0;
+    self.0 = 0;
   }
 
   pub fn get(&self) -> u8 {
-    self.value
+    self.0
   }
 
   pub fn set(&mut self, v: u8) {
-    self.value = v;
+    self.0 = v;
   }
 
   pub fn increment(&mut self) {
-    self.value = self.value.wrapping_add(1);
+    self.0 = self.0.wrapping_add(1);
   }
 
   pub fn decrement(&mut self) {
-    self.value = self.value.wrapping_sub(1);
+    self.0 = self.0.wrapping_sub(1);
   }
 }
 
@@ -35,21 +33,21 @@ mod tests {
   #[test]
   fn new() {
     let gr = GeneralRegister::new();
-    assert_eq!(gr.value, 0);
+    assert_eq!(gr.0, 0);
   }
 
   #[test]
   fn reset() {
     let mut gr = GeneralRegister::new();
-    gr.value = 25;
+    gr.0 = 25;
     gr.reset();
-    assert_eq!(gr.value, 0);
+    assert_eq!(gr.0, 0);
   }
 
   #[test]
   fn get() {
     let mut gr = GeneralRegister::new();
-    gr.value = 39;
+    gr.0 = 39;
     assert_eq!(gr.get(), 39);
   }
 
@@ -57,6 +55,6 @@ mod tests {
   fn set() {
     let mut gr = GeneralRegister::new();
     gr.set(2);
-    assert_eq!(gr.value, 2);
+    assert_eq!(gr.0, 2);
   }
 }
