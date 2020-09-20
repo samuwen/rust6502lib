@@ -3,7 +3,7 @@ mod registers;
 
 use log::{trace, warn};
 use memory::Memory;
-use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusRegister};
+use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusBit, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
 
 pub const STARTING_MEMORY_BLOCK: u16 = 0x8000;
@@ -94,7 +94,7 @@ impl CPU {
     if self.nmi_pin {
       self.nmi_interrupt();
     }
-    if self.irq_pin && !self.status_register.is_break_bit_set() {
+    if self.irq_pin && !self.status_register.is_flag_set(StatusBit::Interrupt) {
       self.irq_interrupt();
     }
   }
@@ -560,13 +560,6 @@ impl CPU {
     cb(self, value);
   }
 
-  fn flag_operation<F: FnMut(&mut StatusRegister)>(&mut self, name: &str, cb: &mut F) {
-    trace!("{} called", name);
-    cb(&mut self.status_register);
-    // One byte op, all instructions require 2 cycles min.
-    self.sync();
-  }
-
   fn branch(&mut self, condition: bool, op: u8) {
     if condition {
       let overflow;
@@ -587,13 +580,13 @@ impl CPU {
   fn generic_compare(&mut self, test_value: u8, reg_value: u8) {
     let (result, carry) = reg_value.overflowing_sub(test_value);
     if result == 0 {
-      self.status_register.set_zero_bit();
+      self.status_register.set_flag(StatusBit::Zero);
     }
     if !carry {
-      self.status_register.set_carry_bit();
+      self.status_register.set_flag(StatusBit::Carry);
     }
     if (result & 0x80) > 0 {
-      self.status_register.set_negative_bit();
+      self.status_register.set_flag(StatusBit::Negative);
     }
   }
 
@@ -607,12 +600,12 @@ impl CPU {
 
   fn rotate_right(&mut self, value: u8) -> u8 {
     let mut result = value.wrapping_shr(1);
-    if self.status_register.is_carry_bit_set() {
+    if self.status_register.is_flag_set(StatusBit::Carry) {
       result |= 0x80;
     }
     match value & 0x1 == 1 {
-      true => self.status_register.set_carry_bit(),
-      false => self.status_register.clear_carry_bit(),
+      true => self.status_register.set_flag(StatusBit::Carry),
+      false => self.status_register.clear_flag(StatusBit::Carry),
     }
     result
   }
@@ -620,20 +613,20 @@ impl CPU {
   fn shift_right(&mut self, value: u8) -> u8 {
     let result = value.wrapping_shr(1);
     match value & 0x1 == 1 {
-      true => self.status_register.set_carry_bit(),
-      false => self.status_register.clear_carry_bit(),
+      true => self.status_register.set_flag(StatusBit::Carry),
+      false => self.status_register.clear_flag(StatusBit::Carry),
     }
     result
   }
 
   fn rotate_left(&mut self, value: u8) -> u8 {
     let mut result = value.wrapping_shl(1);
-    if self.status_register.is_carry_bit_set() {
+    if self.status_register.is_flag_set(StatusBit::Carry) {
       result |= 0x1;
     }
     match value & 0x80 == 0x80 {
-      true => self.status_register.set_carry_bit(),
-      false => self.status_register.clear_carry_bit(),
+      true => self.status_register.set_flag(StatusBit::Carry),
+      false => self.status_register.clear_flag(StatusBit::Carry),
     }
     result
   }
@@ -641,8 +634,8 @@ impl CPU {
   fn shift_left(&mut self, value: u8) -> u8 {
     let result = value.wrapping_shl(1);
     match value & 0x80 == 0x80 {
-      true => self.status_register.set_carry_bit(),
-      false => self.status_register.clear_carry_bit(),
+      true => self.status_register.set_flag(StatusBit::Carry),
+      false => self.status_register.clear_flag(StatusBit::Carry),
     }
     result
   }
@@ -654,6 +647,7 @@ impl CPU {
   */
 
   fn interrupt(&mut self, low_vec: u16, hi_vec: u16) -> u16 {
+    self.status_register.set_flag(StatusBit::Interrupt);
     self.internal_operations();
     let ops = self.program_counter.to_le_bytes();
     self.push_to_stack(ops[0]);
@@ -672,6 +666,8 @@ impl CPU {
     self
       .program_counter
       .jump(u16::from_le_bytes([lo_pc, hi_pc]));
+    self.status_register.clear_flag(StatusBit::Interrupt);
+    self.status_register.clear_flag(StatusBit::Break);
   }
 
   /// Unspecified thing that delays execution by two cycles.
@@ -714,9 +710,10 @@ impl CPU {
     let result = value & self.accumulator.get();
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
-    self
-      .status_register
-      .handle_c_flag(message, self.status_register.is_negative_bit_set());
+    self.status_register.handle_c_flag(
+      message,
+      self.status_register.is_flag_set(StatusBit::Negative),
+    );
   }
 
   /// Illegal opcode.
@@ -759,7 +756,7 @@ impl CPU {
   pub fn adc(&mut self, value: u8) {
     let message = "ADC";
     trace!("{} called with value: 0x{:X}", message, value);
-    let modifier = match self.status_register.is_carry_bit_set() {
+    let modifier = match self.status_register.is_flag_set(StatusBit::Carry) {
       true => 1,
       false => 0,
     };
@@ -800,17 +797,17 @@ impl CPU {
     let b5 = (result & 0x20) >> 5;
     let b6 = (result & 0x40) >> 6;
     if b5 == 1 && b6 == 1 {
-      self.status_register.set_carry_bit();
-      self.status_register.clear_overflow_bit();
+      self.status_register.set_flag(StatusBit::Carry);
+      self.status_register.clear_flag(StatusBit::Overflow);
     } else if b5 == 0 && b6 == 0 {
-      self.status_register.clear_carry_bit();
-      self.status_register.clear_overflow_bit();
+      self.status_register.clear_flag(StatusBit::Carry);
+      self.status_register.clear_flag(StatusBit::Overflow);
     } else if b5 == 1 && b6 == 0 {
-      self.status_register.set_overflow_bit();
-      self.status_register.clear_carry_bit();
+      self.status_register.set_flag(StatusBit::Overflow);
+      self.status_register.clear_flag(StatusBit::Carry);
     } else {
-      self.status_register.set_overflow_bit();
-      self.status_register.set_carry_bit();
+      self.status_register.set_flag(StatusBit::Overflow);
+      self.status_register.set_flag(StatusBit::Carry);
     }
     self.status_register.handle_z_flag(result, message);
     self.status_register.handle_n_flag(result, message);
@@ -948,55 +945,56 @@ impl CPU {
     self.status_register.handle_n_flag(value_to_test, "BIT");
     self.status_register.handle_z_flag(n_result, "BIT");
     if (value_to_test & 0x40) >> 6 == 1 {
-      self.status_register.set_overflow_bit();
+      self.status_register.set_flag(StatusBit::Overflow);
     } else {
-      self.status_register.clear_overflow_bit();
+      self.status_register.clear_flag(StatusBit::Overflow);
     }
   }
 
   pub fn bpl(&mut self) {
     let op = self.get_single_operand();
-    self.branch(!self.status_register.is_negative_bit_set(), op);
+    self.branch(!self.status_register.is_flag_set(StatusBit::Negative), op);
   }
 
   pub fn bmi(&mut self) {
     let op = self.get_single_operand();
-    self.branch(self.status_register.is_negative_bit_set(), op);
+    self.branch(self.status_register.is_flag_set(StatusBit::Negative), op);
   }
 
   pub fn bvc(&mut self) {
     let op = self.get_single_operand();
-    self.branch(!self.status_register.is_overflow_bit_set(), op);
+    self.branch(!self.status_register.is_flag_set(StatusBit::Overflow), op);
   }
 
   pub fn bvs(&mut self) {
     let op = self.get_single_operand();
-    self.branch(self.status_register.is_overflow_bit_set(), op);
+    self.branch(self.status_register.is_flag_set(StatusBit::Overflow), op);
   }
 
   pub fn bcc(&mut self) {
     let op = self.get_single_operand();
-    self.branch(!self.status_register.is_carry_bit_set(), op);
+    self.branch(!self.status_register.is_flag_set(StatusBit::Carry), op);
   }
 
   pub fn bcs(&mut self) {
     let op = self.get_single_operand();
-    self.branch(self.status_register.is_carry_bit_set(), op);
+    self.branch(self.status_register.is_flag_set(StatusBit::Carry), op);
   }
 
   pub fn bne(&mut self) {
     let op = self.get_single_operand();
-    self.branch(!self.status_register.is_zero_bit_set(), op);
+    self.branch(!self.status_register.is_flag_set(StatusBit::Zero), op);
   }
 
   pub fn beq(&mut self) {
     let op = self.get_single_operand();
-    self.branch(self.status_register.is_zero_bit_set(), op);
+    self.branch(self.status_register.is_flag_set(StatusBit::Zero), op);
   }
 
   pub fn brk(&mut self) {
+    self.status_register.set_flag(StatusBit::Break);
     self.program_counter.increment();
-    self.nmi_interrupt();
+    self.irq_interrupt();
   }
 
   pub fn cmp(&mut self, test_value: u8) {
@@ -1012,19 +1010,27 @@ impl CPU {
   }
 
   pub fn clc(&mut self) {
-    self.flag_operation("CLC", &mut StatusRegister::clear_carry_bit);
+    self.status_register.clear_flag(StatusBit::Carry);
+    // All cycles need 2 bytes
+    self.sync();
   }
 
   pub fn cld(&mut self) {
-    self.flag_operation("CLD", &mut StatusRegister::clear_decimal_bit);
+    self.status_register.clear_flag(StatusBit::Decimal);
+    // All cycles need 2 bytes
+    self.sync();
   }
 
   pub fn cli(&mut self) {
-    self.flag_operation("CLI", &mut StatusRegister::clear_interrupt_bit);
+    self.status_register.clear_flag(StatusBit::Interrupt);
+    // All cycles need 2 bytes
+    self.sync();
   }
 
   pub fn clv(&mut self) {
-    self.flag_operation("CLV", &mut StatusRegister::clear_overflow_bit);
+    self.status_register.clear_flag(StatusBit::Overflow);
+    // All cycles need 2 bytes
+    self.sync();
   }
 
   /// Illegal opcode.
@@ -1469,7 +1475,7 @@ impl CPU {
     let message = "RRA";
     warn!("{} called. Something might be borked", message);
     let result = self.rotate_right(value);
-    let modifier = match self.status_register.is_carry_bit_set() {
+    let modifier = match self.status_register.is_flag_set(StatusBit::Carry) {
       true => 1,
       false => 0,
     };
@@ -1511,15 +1517,21 @@ impl CPU {
   }
 
   pub fn sec(&mut self) {
-    self.flag_operation("SEC", &mut StatusRegister::set_carry_bit);
+    self.status_register.set_flag(StatusBit::Carry);
+    // All ops require two bytes
+    self.sync();
   }
 
   pub fn sed(&mut self) {
-    self.flag_operation("SED", &mut StatusRegister::set_decimal_bit);
+    self.status_register.set_flag(StatusBit::Decimal);
+    // All ops require two bytes
+    self.sync();
   }
 
   pub fn sei(&mut self) {
-    self.flag_operation("SEI", &mut StatusRegister::set_interrupt_bit);
+    self.status_register.set_flag(StatusBit::Interrupt);
+    // All ops require two bytes
+    self.sync();
   }
 
   /// Illegal opcode.
