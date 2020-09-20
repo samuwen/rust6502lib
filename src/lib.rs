@@ -762,6 +762,24 @@ impl CPU {
     result
   }
 
+  /// Sets a flag
+  ///
+  /// Wrapper around set flag to ensure cycles are correct
+  fn set_flag(&mut self, flag: StatusBit) {
+    self.status_register.set_flag(flag);
+    // All instruction require at minimum two machine cycles
+    self.sync();
+  }
+
+  /// Clears a flag
+  ///
+  /// Wrapper around clear flag to ensure cycles are correct
+  fn clear_flag(&mut self, flag: StatusBit) {
+    self.status_register.clear_flag(flag);
+    // All instruction require at minimum two machine cycles
+    self.sync();
+  }
+
   /*
   ============================================================================================
                                   Interrupts
@@ -1222,28 +1240,36 @@ impl CPU {
     self.generic_compare(test_value, self.y_register.get());
   }
 
+  /// CLear Carry flag
+  ///
+  /// Clears the carry flag
   pub fn clc(&mut self) {
-    self.status_register.clear_flag(StatusBit::Carry);
-    // All cycles need 2 bytes
-    self.sync();
+    debug!("CLC called");
+    self.clear_flag(StatusBit::Carry);
   }
 
+  /// CLear Decimal flag
+  ///
+  /// Clears the decimal flag
   pub fn cld(&mut self) {
-    self.status_register.clear_flag(StatusBit::Decimal);
-    // All cycles need 2 bytes
-    self.sync();
+    debug!("CLD called");
+    self.clear_flag(StatusBit::Decimal);
   }
 
+  /// CLear Interrupt flag
+  ///
+  /// Clears the interrupt flag
   pub fn cli(&mut self) {
-    self.status_register.clear_flag(StatusBit::Interrupt);
-    // All cycles need 2 bytes
-    self.sync();
+    debug!("CLI called");
+    self.clear_flag(StatusBit::Interrupt);
   }
 
+  /// CLear oVerload flag
+  ///
+  /// Clears the overload flag
   pub fn clv(&mut self) {
-    self.status_register.clear_flag(StatusBit::Overflow);
-    // All cycles need 2 bytes
-    self.sync();
+    debug!("CLV called");
+    self.clear_flag(StatusBit::Overflow);
   }
 
   /// Illegal opcode.
@@ -1258,67 +1284,93 @@ impl CPU {
     self.set_u16(index, result);
   }
 
+  /// Zero page variant of DCP
   pub fn dcp_zp(&mut self) {
+    trace!("DCP zero page called");
     let (index, value) = self.zero_page("DCP");
     self.dcp(index as u16, value);
   }
 
+  /// Zero page x variant of DCP
   pub fn dcp_zp_reg(&mut self) {
+    trace!("DCP zero page x called");
     let (index, value) = self.zp_reg("DEC", self.x_register.get());
     self.dcp(index as u16, value);
   }
 
+  /// Absolute variant of DCP
   pub fn dcp_absolute(&mut self) {
+    trace!("DCP absolute called");
     let (index, value) = self.absolute("DEC");
     self.dcp(index, value);
   }
 
+  /// Absolute x variant of DCP
   pub fn dcp_abs_x(&mut self) {
+    trace!("DCP absolute x called");
     let (index, value) = self.absolute_reg("DCP", self.x_register.get());
     self.dcp(index, value);
   }
 
+  /// Absolute y variant of DCP
   pub fn dcp_abs_y(&mut self) {
+    trace!("DCP absolute y called");
     let (index, value) = self.absolute_reg("DCP", self.y_register.get());
     self.dcp(index, value);
   }
 
+  /// Indexed x variant of DCP
   pub fn dcp_indexed_x(&mut self) {
+    trace!("DCP indexed x called");
     let (index, value) = self.indexed_x("DCP");
     self.dcp(index, value);
   }
 
+  /// Indexed y variant of DCP
   pub fn dcp_indexed_y(&mut self) {
+    trace!("DCP indexed y called");
     let (index, value) = self.indexed_y("DCP");
     self.dcp(index, value);
   }
 
+  /// DECrement memory
+  ///
+  /// Gets memory from a source, decrements it by one, then saves it.
+  /// Read Modify Update operation need an extra cycle to modify.
   pub fn dec(&mut self, index: u16, value: u8) {
     let value = value.wrapping_sub(1);
     // extra cycle for modification
     self.sync();
-    trace!("DEC called index: {}, value: {}", index, value);
+    debug!("DEC called index: {}, value: {}", index, value);
     self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "DEC");
     self.status_register.handle_z_flag(value, "DEC");
   }
 
+  /// Zero page variant of DEC
   pub fn dec_zp(&mut self) {
+    trace!("DEC zero page called");
     let (index, value) = self.zero_page("DEC");
     self.dec(index as u16, value);
   }
 
+  /// Zero page x variant of DEC
   pub fn dec_zp_reg(&mut self) {
+    trace!("DEC zero page x called");
     let (index, value) = self.zp_reg("DEC", self.x_register.get());
     self.dec(index as u16, value);
   }
 
+  /// Absolute variant of DEC
   pub fn dec_abs(&mut self) {
+    trace!("DEC absolute called");
     let (index, value) = self.absolute("DEC");
     self.dec(index as u16, value);
   }
 
+  /// Absolute x variant of DEC
   pub fn dec_abs_x(&mut self) {
+    trace!("DEC absolute x called");
     let (index, value) = self.absolute_reg("DEC", self.x_register.get());
     self.dec(index, value);
     // extra cycle. do not know why
@@ -1326,48 +1378,62 @@ impl CPU {
   }
 
   /// Illegal opcode
-  /// Nop.
+  /// Nop. Underscored value to allow for callback variants
   pub fn dop(&mut self, _: u8) {
     warn!("DOP called. Something might be borked");
     self.nop();
   }
 
-  /// DEDICATED TO XOR - GOD OF INVERSE
+  /// Exclusive OR - more commonly known as XOR.
+  ///
+  /// Gets a value, XORs it, then stores that value in the accumulator
   pub fn eor(&mut self, value: u8) {
     let message = "EOR";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     let result = self.accumulator.get() ^ value;
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
   }
 
+  /// INCrement memory
+  ///
+  /// Gets a value from somewhere, decrements it, then stores it in memory.
+  /// Read Modify Update operation need an extra cycle to modify.
   pub fn inc(&mut self, index: u16, value: u8) {
     let value = value.wrapping_add(1);
     // extra cycle for modification
     self.sync();
-    trace!("INC called index: {}, value: {}", index, value);
+    debug!("INC called index: {}, value: {}", index, value);
     self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "INC");
     self.status_register.handle_z_flag(value, "INC");
   }
 
+  /// INC zero page variant
   pub fn inc_zp(&mut self) {
+    trace!("INC zero page called");
     let (index, value) = self.zero_page("INC");
     self.inc(index as u16, value);
   }
 
+  /// INC zero page x variant
   pub fn inc_zp_reg(&mut self) {
+    trace!("INC zero page x called");
     let (index, value) = self.zp_reg("INC", self.x_register.get());
     self.inc(index as u16, value);
   }
 
+  /// INC absolute variant
   pub fn inc_abs(&mut self) {
+    trace!("INC absolute called");
     let (index, value) = self.absolute("INC");
     self.inc(index as u16, value);
   }
 
+  /// INC absolute x variant
   pub fn inc_abs_x(&mut self) {
+    trace!("INC absolute x called");
     let (index, value) = self.absolute_reg("INC", self.x_register.get());
     self.inc(index as u16, value);
     // extra cycle. do not know why
@@ -1396,13 +1462,19 @@ impl CPU {
     panic!("KIL called. CPU is locked.");
   }
 
+  /// JuMP
+  ///
+  /// Continues execution at a new value. Absolute variant.
   pub fn jmp_absolute(&mut self) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
-    trace!("JMP absolute to index: {}", index);
+    debug!("JMP absolute to index: {}", index);
     self.program_counter.jump(index);
   }
 
+  /// JuMP
+  ///
+  /// Continues execution at a new value. Indirect variant
   pub fn jmp_indirect(&mut self) {
     let ops = self.get_two_operands();
     let (low_test, overflow) = ops[0].overflowing_add(1);
@@ -1412,10 +1484,14 @@ impl CPU {
     let hi = self.get_u16(u16::from_le_bytes(ops));
     let lo = self.get_u16(u16::from_le_bytes([low_test, ops[1]]));
     let index = u16::from_le_bytes([hi, lo]);
-    trace!("JMP indirect to index: {}", index);
+    debug!("JMP indirect to index: {}", index);
     self.program_counter.jump(index);
   }
 
+  /// Jump to SuRoutine
+  ///
+  /// Similar to a jump but to an explicit subroutine. Pushes the program
+  /// counter to the stack to allow for returns.
   pub fn jsr(&mut self) {
     let ops = self.get_two_operands();
     self.program_counter.decrease(1);
@@ -1423,7 +1499,7 @@ impl CPU {
     self.memory.push_to_stack(pc_ops[0]);
     self.memory.push_to_stack(pc_ops[1]);
     let index = u16::from_le_bytes(ops);
-    trace!("JSR to index: {}, PC stored on stack", index,);
+    debug!("JSR to index: {}, PC stored on stack", index,);
     // extra cycle needed due the return address
     self.sync();
     self.program_counter.jump(index);
@@ -1458,43 +1534,52 @@ impl CPU {
     self.status_register.handle_z_flag(value, message);
   }
 
-  /// Loads the accumulator with the value given
+  /// LoaD Accumulator
+  ///
+  /// Loads a value into the accumulator
   ///
   /// Affects flags N Z
   pub fn lda(&mut self, value: u8) {
     let message = "LDA";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     self.accumulator.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
   }
 
+  /// LoaD X register
+  ///
   /// Loads a value into the X register.
   ///
-  /// Flags: N, Z
+  /// Affects flags N Z
   pub fn ldx(&mut self, value: u8) {
     let message = "LDX";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     self.x_register.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
   }
 
+  /// LoaD Y register
+  ///
   /// Loads a value into the Y register.
   ///
-  /// Flags: N, Z
+  /// Affects flags N Z
   pub fn ldy(&mut self, value: u8) {
     let message = "LDY";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     self.y_register.set(value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
   }
 
+  /// Logical Shift Right
+  ///
   /// Shifts all bits right one position
   ///
   /// Affects flags N Z C
   fn lsr(&mut self, value: u8) -> u8 {
+    debug!("LSR called on {}", value);
     let (result, carry) = value.overflowing_shr(1);
     // extra cycle for modification
     self.sync();
@@ -1504,84 +1589,126 @@ impl CPU {
     result
   }
 
+  /// LSR accumulator variant
   pub fn lsr_accumulator(&mut self) {
+    trace!("LSR accumulator called");
     let result = self.lsr(self.accumulator.get());
     self.accumulator.set(result);
   }
 
+  /// LSR zero page variant
   pub fn lsr_zero_page(&mut self) {
+    trace!("LSR zero page called");
     let (index, value) = self.zero_page("LSR");
     let result = self.lsr(value);
     self.set_zero_page(index, result);
   }
 
+  /// LSR zero page x variant
   pub fn lsr_zero_page_x(&mut self) {
+    trace!("LSR zero page x called");
     let (index, value) = self.zp_reg("LSR", self.x_register.get());
     let result = self.lsr(value);
     self.set_zero_page(index, result);
   }
 
+  /// LSR absolute variant
   pub fn lsr_absolute(&mut self) {
+    trace!("LSR absolute called");
     let (index, value) = self.absolute("LSR");
     let result = self.lsr(value);
     self.set_u16(index, result);
   }
 
+  /// LSR absolute x variant
   pub fn lsr_absolute_x(&mut self) {
+    trace!("LSR absolute x called");
     let (index, value) = self.absolute_reg("LSR", self.x_register.get());
     let result = self.lsr(value);
     self.set_u16(index, result);
   }
 
+  /// No OPeration
+  ///
+  /// Uses two cycles and gives you a smug sense of satisfaction
   pub fn nop(&mut self) {
+    debug!("NOP called");
     // Extra cycle as all instruction require two bytes.
     self.sync();
   }
 
+  /// OR with Accumulator
+  ///
+  /// Takes a value, ORs it with the accumulator, then sets that result to
+  /// the accumulator
   pub fn ora(&mut self, value: u8) {
     let message = "ORA";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     let result = self.accumulator.get() | value;
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
   }
 
+  /// Transfer Accumulator to X register
+  ///
+  /// Takes the value in the accumulator and loads the x register with it.
   pub fn tax(&mut self) {
     self.x_register.set(self.x_register.get());
     self.register_operation(self.x_register.get(), "TAX");
   }
 
+  /// Transfer X register to Accumulator
+  ///
+  /// Takes the value in the x register and loads the accumulator with it.
   pub fn txa(&mut self) {
     self.accumulator.set(self.x_register.get());
     self.register_operation(self.x_register.get(), "TXA");
   }
 
+  /// DEcrement X register
+  ///
+  /// Takes the value in the x register and decrements it
   pub fn dex(&mut self) {
     self.x_register.decrement();
     self.register_operation(self.x_register.get(), "DEX");
   }
 
+  /// INcrement X register
+  ///
+  /// Takes the value in the x register and increments it
   pub fn inx(&mut self) {
     self.x_register.increment();
     self.register_operation(self.x_register.get(), "INX");
   }
 
+  /// Transfer Accumulator to Y register
+  ///
+  /// Takes the value in the accumulator and loads the Y register with it
   pub fn tay(&mut self) {
     self.y_register.set(self.accumulator.get());
     self.register_operation(self.y_register.get(), "TAY");
   }
 
+  /// Transfer Y register to Accumulator
+  ///
+  /// Takes the value in the Y register and loads the accumulator with it
   pub fn tya(&mut self) {
     self.accumulator.set(self.y_register.get());
     self.register_operation(self.y_register.get(), "TYA");
   }
 
+  /// DEcrement Y register
+  ///
+  /// Takes the value in the Y register and decrements it.
   pub fn dey(&mut self) {
     self.y_register.decrement();
     self.register_operation(self.y_register.get(), "DEY");
   }
 
+  /// INcrement Y register
+  ///
+  /// Takes the value in the Y register and increments it.
   pub fn iny(&mut self) {
     self.y_register.increment();
     self.register_operation(self.y_register.get(), "INY");
