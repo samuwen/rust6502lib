@@ -649,7 +649,7 @@ impl CPU {
   fn interrupt(&mut self, low_vec: u16, hi_vec: u16) -> u16 {
     self.status_register.set_flag(StatusBit::Interrupt);
     self.internal_operations();
-    let ops = self.program_counter.to_le_bytes();
+    let ops = self.program_counter.get().to_le_bytes();
     self.push_to_stack(ops[0]);
     self.push_to_stack(ops[1]);
     self.push_to_stack(self.status_register.get_register());
@@ -993,7 +993,7 @@ impl CPU {
 
   pub fn brk(&mut self) {
     self.status_register.set_flag(StatusBit::Break);
-    self.program_counter.increment();
+    self.program_counter.increase(1);
     self.irq_interrupt();
   }
 

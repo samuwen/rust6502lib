@@ -1,27 +1,33 @@
-/// A generic 6502 register.
+/// A generic 6502 register, X Y or A
 pub struct GeneralRegister(u8);
 
 impl GeneralRegister {
+  /// Creates a new register
   pub fn new() -> GeneralRegister {
     GeneralRegister(0)
   }
 
+  ///  Rests the register value to 0
   pub fn reset(&mut self) {
     self.0 = 0;
   }
 
+  /// Gets the register's value
   pub fn get(&self) -> u8 {
     self.0
   }
 
+  /// Sets the register's value
   pub fn set(&mut self, v: u8) {
     self.0 = v;
   }
 
+  /// Increment's the register's value by 1. Wraps if overflow.
   pub fn increment(&mut self) {
     self.0 = self.0.wrapping_add(1);
   }
 
+  /// Decrement's the register's value by 1. Wraps if overflow.
   pub fn decrement(&mut self) {
     self.0 = self.0.wrapping_sub(1);
   }
