@@ -5,22 +5,6 @@ use std::fmt::{Display, Formatter};
 const BASE: u8 = 2;
 
 /// A 6502 status register with bitmasking implementation.
-///
-/// # Examples
-///
-///```
-/// let mut sr = StatusRegister::new();
-/// sr.set_carry_bit();
-/// assert_eq!(sr.is_carry_bit_set(), true);
-///```
-/// Has 7 settable flags, each corresponding to the original bit ordinal
-/// of the 6502. Each bit can be set, cleared, and tested for truth.
-/// ```
-/// let mut sr = StatusRegister::new();
-/// sr.set_negative_bit();
-/// sr.clear_zero_bit();
-/// sr.is_overflow_bit_set();
-/// ```
 pub struct StatusRegister(u8);
 
 impl StatusRegister {

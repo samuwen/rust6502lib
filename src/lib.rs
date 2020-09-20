@@ -1666,32 +1666,32 @@ impl CPU {
 
   pub fn stx_zero_page(&mut self) {
     let index = self.zero_page_index("STX");
-    self.memory.set_zero_page(index, self.x_register.get());
+    self.set_zero_page(index, self.x_register.get());
   }
 
   pub fn stx_zero_page_y(&mut self) {
     let index = self.zp_reg_index("STX", self.y_register.get());
-    self.memory.set_zero_page(index, self.x_register.get());
+    self.set_zero_page(index, self.x_register.get());
   }
 
   pub fn stx_absolute(&mut self) {
     let index = self.absolute_index("STX");
-    self.memory.set(index, self.x_register.get());
+    self.set_u16(index, self.x_register.get());
   }
 
   pub fn sty_zero_page(&mut self) {
     let index = self.zero_page_index("STY");
-    self.memory.set_zero_page(index, self.y_register.get());
+    self.set_zero_page(index, self.y_register.get());
   }
 
   pub fn sty_zero_page_x(&mut self) {
     let index = self.zp_reg_index("STY", self.x_register.get());
-    self.memory.set_zero_page(index, self.y_register.get());
+    self.set_zero_page(index, self.y_register.get());
   }
 
   pub fn sty_absolute(&mut self) {
     let index = self.absolute_index("STY");
-    self.memory.set(index, self.y_register.get());
+    self.set_u16(index, self.y_register.get());
   }
 
   /// Illegal opcode.
