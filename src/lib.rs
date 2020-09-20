@@ -1,14 +1,23 @@
 mod memory;
 mod registers;
 
-use log::{trace, warn};
+use log::{debug, trace, warn};
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusBit, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
 
+/// A semi-arbitrary choice for where to start program execution. This is what the NES uses
+/// so I figured its as good a place as any to begin.
 pub const STARTING_MEMORY_BLOCK: u16 = 0x8000;
 
 /// An emulated CPU for the 6502 processor.
+///
+/// The 6502 is a little endian machine.
+/// The 6502 has 3 general purpose registers, X and Y, and an Accumulator.
+/// It has a program counter to keep track of program execution.
+/// It has a status register to keep track of 7 different status flags.
+/// It has onboard 16 bit memory.
+/// We simulate 4 hardware pins - 3 for interrupts and one for the clock.
 pub struct CPU {
   program_counter: ProgramCounter,
   accumulator: GeneralRegister,
@@ -23,9 +32,9 @@ pub struct CPU {
 }
 
 impl CPU {
-  /// Initializes a new CPU instance. Sets all values to 0 by default.
+  /// Initializes a new CPU instance. Sets all values to their associated defaults.
   pub fn new() -> CPU {
-    trace!("Initializing CPU");
+    debug!("Initializing CPU");
     CPU {
       program_counter: ProgramCounter::new(),
       accumulator: GeneralRegister::new(),
@@ -41,6 +50,7 @@ impl CPU {
   }
 
   pub fn reset(&mut self) {
+    debug!("Resetting CPU");
     self.program_counter.reset();
     self.accumulator.reset();
     self.x_register.reset();
@@ -51,23 +61,34 @@ impl CPU {
     self.irq_pin = false;
     self.nmi_pin = false;
     self.clock_pin = false;
-    trace!("CPU Reset")
   }
 
-  fn load_program_into_memory(&mut self, program: &Vec<u8>) {
-    let mut memory_address = STARTING_MEMORY_BLOCK;
+  /// Loads the program into memory.
+  ///
+  /// # Panics
+  /// Panics if the program is too big for the allocated memory space.
+  fn load_program_into_memory(&mut self, program: &Vec<u8>, block: u16) {
+    debug!("Loading program into memory starting at: {}", block);
+    let mut memory_address = block;
+    if program.len() + block as usize > 0xFFFF {
+      panic!("Program is too large for allocated memory space. Maybe you didn't set a custom starting block?");
+    }
     for byte in program.iter() {
       self.memory.set(memory_address, *byte);
       memory_address += 1;
     }
   }
 
-  /// Waits for a timing signal to be available at the clock pin.
+  /// Waits for a timing signal to be available at the clock pin. Checks interrupt
+  /// pins in the meanwhile. This simulates that the cpu will finish its current
+  /// instruction when an interrupt comes in, then go off and handle the interrupt.
   fn sync(&mut self) {
+    trace!("Completed machine cycle");
     while !self.clock_pin {
       self.check_pins();
     }
     self.clock_pin = false;
+    trace!("Starting machine cycle");
   }
 
   /// Simulates signal to the clock pin, enabling the next cycle to execute.
@@ -75,18 +96,28 @@ impl CPU {
     self.clock_pin = true;
   }
 
+  /// Sets the reset pin to allow for a reset interrupt.
   pub fn set_reset(&mut self) {
+    trace!("Reset pin set. CPU should now reset");
     self.reset_pin = true;
   }
 
+  /// Sets the NMI pin to allow for a Non-Maskable interrupt. Non-maskable interrupts
+  /// are run regardless of the setting of the interrupt bit.
   pub fn set_nmi(&mut self) {
+    trace!("NMI pin set. Interrupt should be handled");
     self.nmi_pin = true;
   }
 
+  /// Sets the IRQ pin to allow for a Maskable interrupt. Maskable interrupts are run
+  /// only when the interrupt bit is unset.
   pub fn set_irq(&mut self) {
+    trace!("IRQ pin set. Interrupt may be handled");
     self.irq_pin = true;
   }
 
+  /// Checks to see if we have an interrupt at the pins. Check is in priority order,
+  /// that being Reset, NMI, IRQ.
   fn check_pins(&mut self) {
     if self.reset_pin {
       self.reset_interrupt();
@@ -99,13 +130,20 @@ impl CPU {
     }
   }
 
+  /// Pushes a value to the stack. Memory operations cost machine cycles so this
+  /// waits for a cycle.
   fn push_to_stack(&mut self, value: u8) {
+    trace!("Push to stack wrapper called");
     self.memory.push_to_stack(value);
     // writing to memory
     self.sync();
   }
 
+  /// Pops(pulls) a value from the stack. Memory operations cost machine cycles
+  /// so this waits for a cycle. Pop operations (poperations?) also cost a
+  /// machine cycle so we account for that as well.
   fn pop_from_stack(&mut self) -> u8 {
+    trace!("Pop from stack wrapper called");
     // incrementing the pointer
     self.sync();
     let val = self.memory.pop_from_stack();
@@ -114,53 +152,94 @@ impl CPU {
     val
   }
 
+  /// Wrapper around getting a 16 bit memory value. We wrap this because memory
+  /// operations cost machine cycles so this waits for a cycle.
   fn get_u16(&mut self, index: u16) -> u8 {
+    trace!("Get u16 wrapper called");
     let val = self.memory.get_u16(index);
     self.sync();
     val
   }
 
+  /// Wrapper around setting a 16 bit memory value. We wrap this because memory
+  /// operations cost machine cycles so this waits for a cycle.
   fn set_u16(&mut self, index: u16, value: u8) {
+    trace!("Set u16 wrapper called");
     self.memory.set(index, value);
     self.sync();
   }
 
+  /// Wrapper around setting a zero page value. We wrap this because memory operations
+  /// cost machine cycles so this waits for a cycle.
   fn get_zero_page(&mut self, index: u8) -> u8 {
+    trace!("Get zero page wrapper called");
     let val = self.memory.get_zero_page(index);
     self.sync();
     val
   }
 
+  /// Wrapper around getting a zero page value. We wrap this because memory operations
+  /// cost machine cycles so this waits for a cycle.
   fn set_zero_page(&mut self, index: u8, value: u8) {
+    trace!("Set zero page wrapper called");
     self.memory.set_zero_page(index, value);
     self.sync();
   }
 
+  /// Gets a byte from the program under execution. This increments the program counter,
+  /// returns the value in memory at the address returned by the counter, and waits for
+  /// a cycle.
   fn get_single_operand(&mut self) -> u8 {
     let op = self.memory.get_u16(self.program_counter.get_and_increase());
+    debug!("Getting an operand with value: {}", op);
     self.sync();
     op
   }
 
+  /// Gets two bytes from the program under execution. This increments the program counter,
+  /// returns the value in memory at the address returned by the counter, and waits for
+  /// a cycle, twice.
   fn get_two_operands(&mut self) -> [u8; 2] {
-    let lo = self.memory.get_u16(self.program_counter.get_and_increase());
-    self.sync();
-    let hi = self.memory.get_u16(self.program_counter.get_and_increase());
-    self.sync();
+    let lo = self.get_single_operand();
+    let hi = self.get_single_operand();
     [lo, hi]
   }
 
+  /// For some addressing modes, if bytes overflow it costs an additional machine cycle. We
+  /// validate if an overflow occurred, and delay as appropriate if needed.
   fn test_for_overflow(&mut self, op1: u8, op2: u8) {
     let (_, overflow) = op1.overflowing_add(op2);
     if overflow {
+      trace!("Overflow found, costing a machine cycle");
       self.sync();
     }
   }
 
-  /// Runs a program while there are opcodes to handle. This will change when we actually have
-  /// a real data set to operate against.
-  pub fn run(&mut self, program: Vec<u8>) {
-    self.load_program_into_memory(&program);
+  /// Loads a program and begins running it.
+  ///
+  /// Programs must be provided as vectors of byte code, optionally
+  /// providing a starting block for where the program should live in memory. This will load
+  /// the program into memory starting at the block specified.
+  ///
+  /// Once the program is loaded, enters a loop that gets the next opcode and matches its number
+  /// to the master opcode map, calling the explicit opcode function.
+  ///
+  /// # Panics
+  /// This will panic if the program is larger than the remaining difference between 0xFFFF and
+  /// the starting memory block provided.
+  ///
+  /// # Notes
+  /// Official opcodes were built and implemented based off the information at
+  /// http://6502.org/tutorials/6502opcodes.html
+  /// Illegal opcodes were built and implemented based off the information at
+  /// http://nesdev.com/undocumented_opcodes.txt
+  pub fn run(&mut self, program: Vec<u8>, start: Option<u16>) {
+    let block = match start {
+      Some(v) => v,
+      None => STARTING_MEMORY_BLOCK,
+    };
+    self.load_program_into_memory(&program, block);
+    debug!("Program loaded. Beginning run loop");
     loop {
       let opcode = self.get_single_operand();
       match opcode {
@@ -433,10 +512,11 @@ impl CPU {
   /// Immediate addressing mode. Costs one cycle.
   fn immediate(&mut self, name: &str) -> u8 {
     let op = self.get_single_operand();
-    trace!("{} immediate called with operand:0x{:X}", name, op);
+    debug!("{} immediate called with operand:0x{:X}", name, op);
     op
   }
 
+  /// Callback version of immediate addressing mode.
   fn immediate_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let op = self.immediate(name);
     cb(self, op);
@@ -445,17 +525,18 @@ impl CPU {
   /// Zero page addressing mode. Costs two cycles.
   fn zero_page(&mut self, name: &str) -> (u8, u8) {
     let index = self.get_single_operand();
-    trace!("{} zero page called with index: 0x{:X}", name, index);
+    debug!("{} zero page called with index: 0x{:X}", name, index);
     (index, self.get_zero_page(index))
   }
 
   /// Zero page addressing mode. Costs one cycle
   fn zero_page_index(&mut self, name: &str) -> u8 {
     let index = self.get_single_operand();
-    trace!("{} zero page called with index: 0x{:X}", name, index);
+    debug!("{} zero page called with index: 0x{:X}", name, index);
     index
   }
 
+  /// Callback version of zero page addressing mode.
   fn zero_page_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.zero_page(name);
     cb(self, value);
@@ -464,7 +545,7 @@ impl CPU {
   /// Zero page x or y addressing mode. Costs 3 cycles.
   fn zp_reg(&mut self, name: &str, reg_val: u8) -> (u8, u8) {
     let op = self.get_single_operand();
-    trace!("{} zero page x called with operand: 0x{:X}", name, op);
+    debug!("{} zero page x called with operand: 0x{:X}", name, op);
     // waste a cycle
     self.get_zero_page(op);
     let index = op.wrapping_add(reg_val);
@@ -474,12 +555,13 @@ impl CPU {
   /// Zero page x or y addressing mode. Costs 2 cycles.
   fn zp_reg_index(&mut self, name: &str, reg_val: u8) -> u8 {
     let op = self.get_single_operand();
-    trace!("{} zero page x called with operand: 0x{:X}", name, op);
+    debug!("{} zero page x called with operand: 0x{:X}", name, op);
     // waste a cycle
     self.get_zero_page(op);
     op.wrapping_add(reg_val)
   }
 
+  /// Callback version of zero page register addressing modes (x or y)
   fn zp_reg_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, reg_val: u8, cb: &mut F) {
     let (_, value) = self.zp_reg(name, reg_val);
     cb(self, value);
@@ -489,7 +571,7 @@ impl CPU {
   fn absolute(&mut self, name: &str) -> (u16, u8) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
-    trace!("{} absolute called with index: 0x{:X}", name, index);
+    debug!("{} absolute called with index: 0x{:X}", name, index);
     (index, self.get_u16(index))
   }
 
@@ -497,10 +579,11 @@ impl CPU {
   fn absolute_index(&mut self, name: &str) -> u16 {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
-    trace!("{} absolute called with index: 0x{:X}", name, index);
+    debug!("{} absolute called with index: 0x{:X}", name, index);
     index
   }
 
+  /// Callback version of absolute addressing mode.
   fn absolute_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.absolute(name);
     cb(self, value);
@@ -511,17 +594,19 @@ impl CPU {
   fn absolute_reg(&mut self, name: &str, reg: u8) -> (u16, u8) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
-    trace!("{} absolute reg called with index: 0x{:X}", name, index);
+    debug!("{} absolute reg called with index: 0x{:X}", name, index);
     let total = index.wrapping_add(reg as u16);
     self.test_for_overflow(ops[1], reg);
     (index, self.get_u16(total))
   }
 
+  /// Callback version of Absolute X addressing mode.
   fn absolute_x_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.absolute_reg(name, self.x_register.get());
     cb(self, value);
   }
 
+  /// Callback version of Absolute Y addressing mode.
   fn absolute_y_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.absolute_reg(name, self.y_register.get());
     cb(self, value);
@@ -530,7 +615,7 @@ impl CPU {
   /// AKA Indexed indirect AKA pre-indexed. Costs 4 cycles
   fn indexed_x(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
-    trace!("{} indexed x called with operand: 0x{:X}", name, op);
+    debug!("{} indexed x called with operand: 0x{:X}", name, op);
     let modified_op = op.wrapping_add(self.x_register.get());
     let lo = self.get_zero_page(modified_op);
     let hi = self.get_zero_page(modified_op.wrapping_add(1));
@@ -538,6 +623,7 @@ impl CPU {
     (index, self.get_u16(index))
   }
 
+  /// Callback version of indexed x addressing mode.
   fn indexed_x_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.indexed_x(name);
     cb(self, value);
@@ -546,7 +632,7 @@ impl CPU {
   /// AKA Indirect indexed AKA post-indexed. Costs 4 cycles
   fn indexed_y(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
-    trace!("{} indexed y called with operand: 0x{:X}", name, op);
+    debug!("{} indexed y called with operand: 0x{:X}", name, op);
     let y_val = self.y_register.get();
     let lo = self.get_zero_page(op);
     let hi = self.get_zero_page(op.wrapping_add(1));
@@ -555,50 +641,74 @@ impl CPU {
     (index, self.memory.get_u16(index))
   }
 
+  /// Callback version of indexed y addressing mode.
   fn indexed_y_cb<F: FnMut(&mut Self, u8)>(&mut self, name: &str, cb: &mut F) {
     let (_, value) = self.indexed_y(name);
     cb(self, value);
   }
 
+  /// Generic handler for branching. Branching costs an extra machine cycle if
+  /// the branch is taken, and additionally if the branch adjustment crosses
+  /// a memory page boundary an additional machine cycle is required.
+  ///
+  /// If the operand is greater than 0x7F we assume it is negative and handle
+  /// it as two's complement.
   fn branch(&mut self, condition: bool, op: u8) {
     if condition {
-      let overflow;
-      if op > 0x7F {
-        overflow = self.program_counter.decrease(!op + 1);
-      } else {
-        overflow = self.program_counter.increase(op);
-      }
+      let overflow = match op > 0x7F {
+        // Funky syntax is two's complement. Cannot have negative unsigned.
+        true => self.program_counter.decrease(!op + 1),
+        false => self.program_counter.increase(op),
+      };
       if overflow {
         // Page overflow costs a cycle
         self.sync();
       }
       // Branch taken costs a cycle
       self.sync();
+      debug!(
+        "Branch taken. Execution resuming at {}",
+        self.program_counter.get()
+      );
     }
   }
 
+  /// Tests if a value meets specific criteria and sets bits as appropriate.
+  ///
+  /// reg_value can be any of the 3 generic registers. If the reg_value is
+  /// greater than or equal to the test_value, the carry is set.
   fn generic_compare(&mut self, test_value: u8, reg_value: u8) {
+    trace!("Comparing values");
     let (result, carry) = reg_value.overflowing_sub(test_value);
     if result == 0 {
       self.status_register.set_flag(StatusBit::Zero);
     }
+    // Carry is true only when the test value is greater than the register value.
     if !carry {
       self.status_register.set_flag(StatusBit::Carry);
     }
+    // Check if bit 7 is set
     if (result & 0x80) > 0 {
       self.status_register.set_flag(StatusBit::Negative);
     }
   }
 
+  /// Generic register operation, such as transfer accumulator to x register.
+  ///
+  /// These are one byte instructions so we need to wait for a machine cycle,
+  /// We always check the same flags so we do so generically.
   fn register_operation(&mut self, value: u8, message: &str) {
-    trace!("{} called with value: {}", message, value);
+    debug!("{} called reg operation with value: {}", message, value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
-    // One byte instruction. All instruction require minimum two bytes.
     self.sync();
   }
 
+  /// Rotates bits to the right.
+  ///
+  /// The carry is shifted into bit 7, and bit 0 is shifted to the carry.
   fn rotate_right(&mut self, value: u8) -> u8 {
+    debug!("Rotating bits to the right");
     let mut result = value.wrapping_shr(1);
     if self.status_register.is_flag_set(StatusBit::Carry) {
       result |= 0x80;
@@ -610,7 +720,11 @@ impl CPU {
     result
   }
 
+  /// Shifts bits to the right.
+  ///
+  /// Zero is shifted into bit 0 and bit 7 is shifted into the carry
   fn shift_right(&mut self, value: u8) -> u8 {
+    debug!("Shifting bits to the right");
     let result = value.wrapping_shr(1);
     match value & 0x1 == 1 {
       true => self.status_register.set_flag(StatusBit::Carry),
@@ -619,7 +733,11 @@ impl CPU {
     result
   }
 
+  /// Rotates bits to the left.
+  ///
+  /// The carry is shifted into bit 0 and bit 7 is shifted into the carry
   fn rotate_left(&mut self, value: u8) -> u8 {
+    debug!("Rotating bits to the left");
     let mut result = value.wrapping_shl(1);
     if self.status_register.is_flag_set(StatusBit::Carry) {
       result |= 0x1;
@@ -631,7 +749,11 @@ impl CPU {
     result
   }
 
+  /// Shifts bits to the left
+  ///
+  /// 0 is shifted into bit 0 and bit 7 is shifted into the carry
   fn shift_left(&mut self, value: u8) -> u8 {
+    debug!("Shift bits to the left");
     let result = value.wrapping_shl(1);
     match value & 0x80 == 0x80 {
       true => self.status_register.set_flag(StatusBit::Carry),
@@ -646,7 +768,15 @@ impl CPU {
   ============================================================================================
   */
 
+  /// Services any type of interrupt.
+  ///
+  /// Interrupts require 7 machine cycles.
+  /// Interrupts push the program counter to the stack, low byte first.
+  /// Interrupts push the status register to the stack.
+  /// Each interrupt type has an address it looks to in order to process instructions, which
+  /// informs how to handle the IRQ.
   fn interrupt(&mut self, low_vec: u16, hi_vec: u16) -> u16 {
+    trace!("Starting interrupt request");
     self.status_register.set_flag(StatusBit::Interrupt);
     self.internal_operations();
     let ops = self.program_counter.get().to_le_bytes();
@@ -655,10 +785,16 @@ impl CPU {
     self.push_to_stack(self.status_register.get_register());
     let lo = self.get_u16(low_vec);
     let hi = self.get_u16(hi_vec);
+    trace!("Interrupt start up complete. Starting interrupt execution");
     u16::from_le_bytes([lo, hi])
   }
 
+  /// Returns from an interrupt.
+  ///
+  /// Restores the cpu back to the state it was before the interrupt transpired.
+  /// Takes 6 cycles to execute.
   fn return_from_interrupt(&mut self) {
+    trace!("Starting to return from interrupt");
     let status_reg = self.pop_from_stack();
     self.status_register.set(status_reg);
     let hi_pc = self.pop_from_stack();
@@ -668,9 +804,10 @@ impl CPU {
       .jump(u16::from_le_bytes([lo_pc, hi_pc]));
     self.status_register.clear_flag(StatusBit::Interrupt);
     self.status_register.clear_flag(StatusBit::Break);
+    trace!("Interrupt return complete. Resuming normal operation");
   }
 
-  /// Unspecified thing that delays execution by two cycles.
+  /// Unspecified thing that delays execution by two cycles. Used for interrupts.
   fn internal_operations(&mut self) {
     self.sync();
     self.sync();
@@ -681,16 +818,21 @@ impl CPU {
   fn reset_interrupt(&mut self) {
     let index = self.interrupt(0xFFFC, 0xFFFD);
     self.program_counter.jump(index);
+    debug!("Reset interrupt called");
     self.reset();
   }
 
+  /// Calls a non-maskable interrupt.
   fn nmi_interrupt(&mut self) {
     let index = self.interrupt(0xFFFA, 0xFFFB);
+    debug!("NMI interrupt called");
     self.program_counter.jump(index);
   }
 
+  /// Calls a regular interrupt.
   fn irq_interrupt(&mut self) {
     let index = self.interrupt(0xFFFE, 0xFFFF);
+    debug!("IRQ interrupt called");
     self.program_counter.jump(index);
   }
 
@@ -730,32 +872,40 @@ impl CPU {
     self.set_u16(index, result);
   }
 
+  /// Performs AAX in zero page addressing mode
   pub fn aax_zero_page(&mut self) {
     let index = self.zero_page_index("AAX");
     self.aax(index as u16);
   }
 
+  /// Performs AAX in zero page x addressing mode
   pub fn aax_zero_page_y(&mut self) {
     let index = self.zp_reg_index("AAX", self.y_register.get());
     self.aax(index as u16);
   }
 
+  /// Performs AAX in indexed x addressing mode
   pub fn aax_indirect_x(&mut self) {
     let (index, _) = self.indexed_x("AAX");
     self.aax(index);
   }
 
+  /// Performs AAX in absolute addressing mode
   pub fn aax_absolute(&mut self) {
     let index = self.absolute_index("AAX");
     self.aax(index);
   }
 
-  /// Adds the value given to the accumulator
+  // TODO: Add BCD
+  /// ADd with Carry
+  ///
+  /// Adds the value given to the accumulator including the carry.
+  /// Uses BCD format if decimal flag is set.
   ///
   /// Affects flags N V Z C
   pub fn adc(&mut self, value: u8) {
     let message = "ADC";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     let modifier = match self.status_register.is_flag_set(StatusBit::Carry) {
       true => 1,
       false => 0,
@@ -771,12 +921,14 @@ impl CPU {
     self.status_register.handle_c_flag(message, carry);
   }
 
-  /// Bitwise and operation performed against the accumulator
+  /// AND accumulator
+  ///
+  /// Bitwise AND operation performed against the accumulator
   ///
   /// Affects flags N Z
   pub fn and(&mut self, value: u8) {
     let message = "AND";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     let result = self.accumulator.get() & value;
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
@@ -813,12 +965,14 @@ impl CPU {
     self.status_register.handle_n_flag(result, message);
   }
 
+  /// Arithmetic Shift Left
+  ///
   /// Shifts all bits left one position for the applied location
   ///
   /// Affects flags N Z C
   fn asl(&mut self, value: u8) -> u8 {
     let message = "ASL";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     let (result, carry) = value.overflowing_shl(1);
     // extra cycle for modification
     self.sync();
@@ -828,30 +982,35 @@ impl CPU {
     result
   }
 
+  /// Performs ASL in accumulator addressing mode
   pub fn asl_accumulator(&mut self) {
     let result = self.asl(self.accumulator.get());
     trace!("ASL accumulator called");
     self.accumulator.set(result);
   }
 
+  /// Performs ASL in zero page addressing mode
   pub fn asl_zero_page(&mut self) {
     let (index, value) = self.zero_page("ASL");
     let result = self.asl(value);
     self.set_zero_page(index, result);
   }
 
+  /// Performs ASL in zero page x addressing mode
   pub fn asl_zero_page_x(&mut self) {
     let (index, value) = self.zp_reg("ASL", self.x_register.get());
     let result = self.asl(value);
     self.set_zero_page(index, result);
   }
 
+  /// Performs ASL in absolute addressing mode
   pub fn asl_absolute(&mut self) {
     let (index, value) = self.absolute("ASL");
     let result = self.asl(value);
     self.set_u16(index, result);
   }
 
+  /// Performs ASL in absolute x addressing mode
   pub fn asl_absolute_x(&mut self) {
     let (index, value) = self.absolute_reg("ASL", self.x_register.get());
     let result = self.asl(value);
@@ -900,6 +1059,7 @@ impl CPU {
     self.set_u16(index, result);
   }
 
+  /// Performs AXA in absolute y addressing mode
   pub fn axa_absolute_y(&mut self) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
@@ -909,6 +1069,7 @@ impl CPU {
     self.axa(index);
   }
 
+  /// Performs AXA in indexed x addressing mode
   pub fn axa_indirect(&mut self) {
     let op = self.get_single_operand();
     let modified_op = op.wrapping_add(self.x_register.get());
@@ -941,6 +1102,7 @@ impl CPU {
   ///
   /// Affects flags N V Z
   fn bit(&mut self, value_to_test: u8) {
+    debug!("BIT called checking {}", value_to_test);
     let n_result = self.accumulator.get() & value_to_test;
     self.status_register.handle_n_flag(value_to_test, "BIT");
     self.status_register.handle_z_flag(n_result, "BIT");
@@ -951,61 +1113,112 @@ impl CPU {
     }
   }
 
+  /// Branch on PLus.
+  ///
+  /// Checks the negative bit and branches if it is clear.
   pub fn bpl(&mut self) {
+    debug!("BPL called");
     let op = self.get_single_operand();
     self.branch(!self.status_register.is_flag_set(StatusBit::Negative), op);
   }
 
+  /// Branch on MInus
+  ///
+  /// Checks the negative bit and branches if it is set.
   pub fn bmi(&mut self) {
+    debug!("BMI called");
     let op = self.get_single_operand();
     self.branch(self.status_register.is_flag_set(StatusBit::Negative), op);
   }
 
+  /// Branch on oVerflow Clear
+  ///
+  /// Checks the overflow bit and branches if it is clear.
   pub fn bvc(&mut self) {
+    debug!("BVC called");
     let op = self.get_single_operand();
     self.branch(!self.status_register.is_flag_set(StatusBit::Overflow), op);
   }
 
+  /// Branch on oVerflow Set
+  ///
+  /// Checks the overflow bit and branches if it is set.
   pub fn bvs(&mut self) {
+    debug!("BVS called");
     let op = self.get_single_operand();
     self.branch(self.status_register.is_flag_set(StatusBit::Overflow), op);
   }
 
+  /// Branch on Carry Clear
+  ///
+  /// Checks the carry bit and branches if it is clear.
   pub fn bcc(&mut self) {
+    debug!("BCC called");
     let op = self.get_single_operand();
     self.branch(!self.status_register.is_flag_set(StatusBit::Carry), op);
   }
 
+  /// Branch on Carry Set
+  ///
+  /// Checks the carry bit and branches if it is set.
   pub fn bcs(&mut self) {
+    debug!("BSC called");
     let op = self.get_single_operand();
     self.branch(self.status_register.is_flag_set(StatusBit::Carry), op);
   }
 
+  /// Branch on Not Equal
+  ///
+  /// Checks the zero bit and branches if it is clear.
   pub fn bne(&mut self) {
+    debug!("BNE called");
     let op = self.get_single_operand();
     self.branch(!self.status_register.is_flag_set(StatusBit::Zero), op);
   }
 
+  /// Branch on EQual
+  ///
+  /// Checks the zero bit and branches if it is set.
   pub fn beq(&mut self) {
+    debug!("BEQ called");
     let op = self.get_single_operand();
     self.branch(self.status_register.is_flag_set(StatusBit::Zero), op);
   }
 
+  /// BReaK
+  ///
+  /// Performs an irq interrupt. Software side so used for debugging.
   pub fn brk(&mut self) {
+    warn!("BRK called. Are you debugging?");
     self.status_register.set_flag(StatusBit::Break);
     self.program_counter.increase(1);
     self.irq_interrupt();
   }
 
+  /// CoMPare accumulator
+  ///
+  /// Checks a test value against the value in the accumulator and sets
+  /// flags accordingly.
   pub fn cmp(&mut self, test_value: u8) {
+    debug!("CMP called");
     self.generic_compare(test_value, self.accumulator.get());
   }
 
+  /// ComPare X register
+  ///
+  /// Checks a test value against the value in the x register and sets
+  /// flags accordingly.
   pub fn cpx(&mut self, test_value: u8) {
+    debug!("CPX called");
     self.generic_compare(test_value, self.x_register.get());
   }
 
+  /// ComPare Y register
+  ///
+  /// Checks a test value against the value in the y register and sets
+  /// flags accordingly.
   pub fn cpy(&mut self, test_value: u8) {
+    debug!("CPY called");
     self.generic_compare(test_value, self.y_register.get());
   }
 

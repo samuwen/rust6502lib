@@ -1,4 +1,5 @@
 use crate::STARTING_MEMORY_BLOCK;
+use log::{debug, trace};
 
 /// The Program Counter for the computer. Keeps track of where the computer's
 /// execution is transpiring.
@@ -12,6 +13,10 @@ impl ProgramCounter {
   /// default memory block. If you want to initialize at another location,
   /// use new_at().
   pub fn new() -> ProgramCounter {
+    debug!(
+      "Initializing a new Program Counter at: {}",
+      STARTING_MEMORY_BLOCK
+    );
     ProgramCounter {
       value: STARTING_MEMORY_BLOCK,
       start: STARTING_MEMORY_BLOCK,
@@ -23,6 +28,7 @@ impl ProgramCounter {
   /// system from working.
   #[allow(dead_code)]
   pub fn new_at(block: u16) -> ProgramCounter {
+    debug!("Initializing a new Program Counter at: {}", block);
     ProgramCounter {
       value: block,
       start: block,
@@ -31,6 +37,7 @@ impl ProgramCounter {
 
   /// Resets the PC to the original start block
   pub fn reset(&mut self) {
+    debug!("Resetting Program Counter to: {}", self.start);
     self.value = self.start;
   }
 
@@ -56,13 +63,17 @@ impl ProgramCounter {
   /// Tests if an addition would cross a page boundary and returns true if it would.
   fn test_page_boundary_add(&mut self, amount: u8) -> bool {
     let ops = self.value.to_le_bytes();
-    return ops[0].overflowing_add(amount).1;
+    let crossed = ops[0].overflowing_add(amount).1;
+    trace!("Page boundary crossing test result: {}", crossed);
+    crossed
   }
 
   /// Tests if a subtraction would cross a page boundary and returns true if it would.
   fn test_page_boundary_sub(&mut self, amount: u8) -> bool {
     let ops = self.value.to_le_bytes();
-    return ops[0].overflowing_sub(amount).1;
+    let crossed = ops[0].overflowing_sub(amount).1;
+    trace!("Page boundary crossing test result: {}", crossed);
+    crossed
   }
 
   /// Sets the program counter to a new location to proceed execution from there.

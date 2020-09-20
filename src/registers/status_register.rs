@@ -1,4 +1,4 @@
-use log::trace;
+use log::{debug, trace};
 use std::fmt::{Display, Formatter};
 
 /// Hey we're in binary!
@@ -46,16 +46,19 @@ impl StatusRegister {
 
   /// Takes in a flag enum and sets that flag to true
   pub fn set_flag(&mut self, flag: StatusBit) {
+    debug!("Setting flag: {:?}", flag);
     self.set_status_register(flag);
   }
 
   /// Takes in a flag enum and checks if that flag is true
   pub fn is_flag_set(&self, flag: StatusBit) -> bool {
+    debug!("Checking flag: {:?}", flag);
     self.is_bit_set(flag)
   }
 
   /// Takes in a flag enum and sets that flag to false
   pub fn clear_flag(&mut self, flag: StatusBit) {
+    debug!("Clearing flag: {:?}", flag);
     self.unset_status_register(flag);
   }
 
@@ -130,7 +133,7 @@ impl Display for StatusRegister {
 /// Enum representing both the types of flags used and also the mask locations. IE on the 6502
 /// the Carry bit is in the 0 position, so it is here as well.
 #[allow(dead_code)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum StatusBit {
   Carry,
   Zero,

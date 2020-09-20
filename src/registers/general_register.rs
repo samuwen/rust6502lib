@@ -1,24 +1,29 @@
+use log::{debug, trace};
 /// A generic 6502 register, X Y or A
 pub struct GeneralRegister(u8);
 
 impl GeneralRegister {
   /// Creates a new register
   pub fn new() -> GeneralRegister {
+    debug!("Initializing a general register");
     GeneralRegister(0)
   }
 
   ///  Rests the register value to 0
   pub fn reset(&mut self) {
+    debug!("Resetting a general register");
     self.0 = 0;
   }
 
   /// Gets the register's value
   pub fn get(&self) -> u8 {
+    trace!("Getting register value: {}", self.0);
     self.0
   }
 
   /// Sets the register's value
   pub fn set(&mut self, v: u8) {
+    trace!("Setting register value to: {}", v);
     self.0 = v;
   }
 
