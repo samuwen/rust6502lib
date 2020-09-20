@@ -1,3 +1,4 @@
+/// A generic 6502 register.
 pub struct GeneralRegister(u8);
 
 impl GeneralRegister {
@@ -29,6 +30,7 @@ impl GeneralRegister {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use test_case::test_case;
 
   #[test]
   fn new() {
@@ -56,5 +58,23 @@ mod tests {
     let mut gr = GeneralRegister::new();
     gr.set(2);
     assert_eq!(gr.0, 2);
+  }
+
+  #[test_case(0, 1; "No wrap")]
+  #[test_case(0xFF, 0; "Wrap")]
+  fn increment(start: u8, end: u8) {
+    let mut gr = GeneralRegister::new();
+    gr.set(start);
+    gr.increment();
+    assert_eq!(gr.0, end);
+  }
+
+  #[test_case(1, 0; "No wrap")]
+  #[test_case(0, 0xFF; "Wrap")]
+  fn decrement(start: u8, end: u8) {
+    let mut gr = GeneralRegister::new();
+    gr.set(start);
+    gr.decrement();
+    assert_eq!(gr.0, end);
   }
 }
