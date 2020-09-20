@@ -173,7 +173,7 @@ mod tests {
   fn bits(bit: StatusBit) {
     let mut reg = StatusRegister::new();
     reg.set_flag(bit);
-    assert_eq!(reg.0 > 1, true);
+    assert_eq!(reg.0 >= 1, true);
     assert_eq!(reg.is_flag_set(bit), true);
     reg.clear_flag(bit);
     assert_eq!(reg.0, 0);
@@ -246,7 +246,7 @@ mod tests {
   fn handle_zero_set() {
     let mut reg = StatusRegister::new();
     reg.handle_z_flag(0x0, "test");
-    assert_eq!(reg.is_flag_set(StatusBit::Overflow), true);
+    assert_eq!(reg.is_flag_set(StatusBit::Zero), true);
   }
 
   #[test]
