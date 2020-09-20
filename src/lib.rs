@@ -5,6 +5,7 @@ use log::{debug, trace, warn};
 use memory::Memory;
 use registers::{GeneralRegister, ProgramCounter, StackPointer, StatusBit, StatusRegister};
 use std::fmt::{Display, Formatter, Result};
+use std::sync::mpsc::Receiver;
 
 /// A semi-arbitrary choice for where to start program execution. This is what the NES uses
 /// so I figured its as good a place as any to begin.
@@ -28,12 +29,12 @@ pub struct CPU {
   reset_pin: bool,
   nmi_pin: bool,
   irq_pin: bool,
-  clock_pin: bool,
+  clock_pin: Receiver<bool>,
 }
 
 impl CPU {
   /// Initializes a new CPU instance. Sets all values to their associated defaults.
-  pub fn new() -> CPU {
+  pub fn new(r: Receiver<bool>) -> CPU {
     debug!("Initializing CPU");
     CPU {
       program_counter: ProgramCounter::new(),
@@ -42,7 +43,7 @@ impl CPU {
       y_register: GeneralRegister::new(),
       status_register: StatusRegister::new(),
       memory: Memory::new(),
-      clock_pin: false,
+      clock_pin: r,
       reset_pin: false,
       irq_pin: false,
       nmi_pin: false,
@@ -60,7 +61,6 @@ impl CPU {
     self.reset_pin = false;
     self.irq_pin = false;
     self.nmi_pin = false;
-    self.clock_pin = false;
   }
 
   /// Loads the program into memory.
@@ -84,16 +84,12 @@ impl CPU {
   /// instruction when an interrupt comes in, then go off and handle the interrupt.
   fn sync(&mut self) {
     trace!("Completed machine cycle");
-    while !self.clock_pin {
+    // let b = self.clock_pin.recv().unwrap();
+    while !self.clock_pin.try_recv().is_ok() {
       self.check_pins();
     }
-    self.clock_pin = false;
+    // self.check_pins();
     trace!("Starting machine cycle");
-  }
-
-  /// Simulates signal to the clock pin, enabling the next cycle to execute.
-  pub fn tick(&mut self) {
-    self.clock_pin = true;
   }
 
   /// Sets the reset pin to allow for a reset interrupt.
@@ -191,7 +187,7 @@ impl CPU {
   /// a cycle.
   fn get_single_operand(&mut self) -> u8 {
     let op = self.memory.get_u16(self.program_counter.get_and_increase());
-    debug!("Getting an operand with value: {}", op);
+    debug!("Getting an operand with value: {:X}", op);
     self.sync();
     op
   }
@@ -233,7 +229,7 @@ impl CPU {
   /// http://6502.org/tutorials/6502opcodes.html
   /// Illegal opcodes were built and implemented based off the information at
   /// http://nesdev.com/undocumented_opcodes.txt
-  pub fn run(&mut self, program: Vec<u8>, start: Option<u16>) {
+  pub fn run(&mut self, program: Vec<u8>, start: Option<u16>) -> bool {
     let block = match start {
       Some(v) => v,
       None => STARTING_MEMORY_BLOCK,
@@ -501,6 +497,7 @@ impl CPU {
         0xFF => self.absolute_x_cb("ISC", &mut Self::isc),
       }
     }
+    return false;
   }
 
   /*
@@ -667,7 +664,7 @@ impl CPU {
       // Branch taken costs a cycle
       self.sync();
       debug!(
-        "Branch taken. Execution resuming at {}",
+        "Branch taken. Execution resuming at {:X}",
         self.program_counter.get()
       );
     }
@@ -698,7 +695,7 @@ impl CPU {
   /// These are one byte instructions so we need to wait for a machine cycle,
   /// We always check the same flags so we do so generically.
   fn register_operation(&mut self, value: u8, message: &str) {
-    debug!("{} called reg operation with value: {}", message, value);
+    debug!("{} called reg operation with value: {:X}", message, value);
     self.status_register.handle_n_flag(value, message);
     self.status_register.handle_z_flag(value, message);
     self.sync();
@@ -1120,7 +1117,7 @@ impl CPU {
   ///
   /// Affects flags N V Z
   fn bit(&mut self, value_to_test: u8) {
-    debug!("BIT called checking {}", value_to_test);
+    debug!("BIT called checking {:X}", value_to_test);
     let n_result = self.accumulator.get() & value_to_test;
     self.status_register.handle_n_flag(value_to_test, "BIT");
     self.status_register.handle_z_flag(n_result, "BIT");
@@ -1341,7 +1338,7 @@ impl CPU {
     let value = value.wrapping_sub(1);
     // extra cycle for modification
     self.sync();
-    debug!("DEC called index: {}, value: {}", index, value);
+    debug!("DEC called index: {:X}, value: {:X}", index, value);
     self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "DEC");
     self.status_register.handle_z_flag(value, "DEC");
@@ -1404,7 +1401,7 @@ impl CPU {
     let value = value.wrapping_add(1);
     // extra cycle for modification
     self.sync();
-    debug!("INC called index: {}, value: {}", index, value);
+    debug!("INC called index: {:X}, value: {:X}", index, value);
     self.set_u16(index, value);
     self.status_register.handle_n_flag(value, "INC");
     self.status_register.handle_z_flag(value, "INC");
@@ -1468,7 +1465,7 @@ impl CPU {
   pub fn jmp_absolute(&mut self) {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
-    debug!("JMP absolute to index: {}", index);
+    debug!("JMP absolute to index: {:X}", index);
     self.program_counter.jump(index);
   }
 
@@ -1484,7 +1481,7 @@ impl CPU {
     let hi = self.get_u16(u16::from_le_bytes(ops));
     let lo = self.get_u16(u16::from_le_bytes([low_test, ops[1]]));
     let index = u16::from_le_bytes([hi, lo]);
-    debug!("JMP indirect to index: {}", index);
+    debug!("JMP indirect to index: {:X}", index);
     self.program_counter.jump(index);
   }
 
@@ -1499,7 +1496,7 @@ impl CPU {
     self.memory.push_to_stack(pc_ops[0]);
     self.memory.push_to_stack(pc_ops[1]);
     let index = u16::from_le_bytes(ops);
-    debug!("JSR to index: {}, PC stored on stack", index,);
+    debug!("JSR to index: {:X}, PC stored on stack", index,);
     // extra cycle needed due the return address
     self.sync();
     self.program_counter.jump(index);
@@ -1579,7 +1576,7 @@ impl CPU {
   ///
   /// Affects flags N Z C
   fn lsr(&mut self, value: u8) -> u8 {
-    debug!("LSR called on {}", value);
+    debug!("LSR called on {:X}", value);
     let (result, carry) = value.overflowing_shr(1);
     // extra cycle for modification
     self.sync();
@@ -1732,7 +1729,7 @@ impl CPU {
   ///
   /// Takes a value and rotates bits to the left.
   fn rol(&mut self, value: u8) -> u8 {
-    debug!("ROL called with value: {}", value);
+    debug!("ROL called with value: {:X}", value);
     let result = self.rotate_left(value);
     // extra cycle for modification
     self.sync();
@@ -1784,7 +1781,7 @@ impl CPU {
   ///
   /// Takes a value and rotates bits to the right.
   fn ror(&mut self, value: u8) -> u8 {
-    debug!("ROR called with value: {}", value);
+    debug!("ROR called with value: {:X}", value);
     let result = self.rotate_right(value);
     // extra cycle for modification
     self.sync();
@@ -2194,4 +2191,161 @@ impl Display for CPU {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use rand::random;
+  use rand::Rng;
+  use std::sync::mpsc;
+  use test_case::test_case;
+
+  fn new_cpu() -> CPU {
+    let (_, rx) = mpsc::channel();
+    CPU::new(rx)
+  }
+
+  fn setup_sync(count: usize) -> CPU {
+    let (tx, rx) = mpsc::channel();
+    let cpu = CPU::new(rx);
+    std::thread::spawn(move || {
+      for _ in 0..count {
+        tx.send(true).unwrap();
+      }
+    });
+    cpu
+  }
+
+  fn wrapping_u8() -> u8 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(0x80, 0xFF)
+  }
+
+  fn non_wrapping_u8() -> u8 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(0x00, 0x7F)
+  }
+
+  #[test]
+  fn new() {
+    let (_, rx) = mpsc::channel();
+    let cpu = CPU::new(rx);
+    assert_eq!(cpu.program_counter.get(), STARTING_MEMORY_BLOCK as usize);
+    assert_eq!(cpu.accumulator.get(), 0);
+    assert_eq!(cpu.x_register.get(), 0);
+    assert_eq!(cpu.y_register.get(), 0);
+    assert_eq!(cpu.status_register.get_register(), 0);
+    assert_eq!(cpu.memory.get_u16(random()), 0);
+    assert_eq!(cpu.reset_pin, false);
+    assert_eq!(cpu.irq_pin, false);
+    assert_eq!(cpu.nmi_pin, false);
+  }
+
+  #[test]
+  fn reset() {
+    let mut cpu = new_cpu();
+    cpu.program_counter.jump(random());
+    cpu.accumulator.set(random());
+    cpu.x_register.set(random());
+    cpu.y_register.set(random());
+    cpu.status_register.set(random());
+    cpu.memory.set(random(), random());
+    cpu.reset_pin = true;
+    cpu.irq_pin = true;
+    cpu.nmi_pin = true;
+    cpu.reset();
+    assert_eq!(cpu.program_counter.get(), STARTING_MEMORY_BLOCK as usize);
+    assert_eq!(cpu.accumulator.get(), 0);
+    assert_eq!(cpu.x_register.get(), 0);
+    assert_eq!(cpu.y_register.get(), 0);
+    assert_eq!(cpu.status_register.get_register(), 0);
+    assert_eq!(cpu.memory.get_u16(random()), 0);
+    assert_eq!(cpu.reset_pin, false);
+    assert_eq!(cpu.irq_pin, false);
+    assert_eq!(cpu.nmi_pin, false);
+  }
+
+  #[test]
+  fn load_program_into_memory() {
+    let mut cpu = new_cpu();
+    let mut vector = vec![];
+    for _ in 0..0xFF {
+      vector.push(random());
+    }
+    cpu.load_program_into_memory(&vector, 0);
+    assert_eq!(cpu.memory.get_zero_page(0x92) > 0, true);
+  }
+
+  #[test]
+  #[should_panic]
+  fn load_program_into_memory_panic() {
+    let mut cpu = new_cpu();
+    let mut vector = vec![];
+    for _ in 0..0xFF {
+      vector.push(random());
+    }
+    cpu.load_program_into_memory(&vector, 0xFFFF);
+  }
+
+  #[test]
+  fn sync_proceeds_when_clock_signal_received() {
+    let mut cpu = setup_sync(1);
+    cpu.sync();
+    // if we got here, things are working
+    assert_eq!(true, true);
+  }
+
+  #[test_case(random())]
+  fn push_to_stack(value: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.push_to_stack(value);
+    assert_eq!(cpu.memory.get_u16(0x1FF), value);
+  }
+
+  #[test_case(random())]
+  fn pop_from_stack(value: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.memory.set(0x100, value);
+    let result = cpu.pop_from_stack();
+    assert_eq!(result, value);
+  }
+
+  #[test_case(random(), random())]
+  fn set_u16(index: u16, value: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.set_u16(index, value);
+    assert_eq!(cpu.memory.get_u16(index), value);
+  }
+
+  #[test_case(random(), random())]
+  fn set_zero_page(index: u8, value: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.set_zero_page(index, value);
+    assert_eq!(cpu.memory.get_zero_page(index), value);
+  }
+
+  #[test_case(random())]
+  fn get_single_operand(value: u8) {
+    let mut cpu = setup_sync(1);
+    let pc = cpu.program_counter.get() + 1;
+    cpu.memory.set(pc as u16, value);
+    let op = cpu.get_single_operand();
+    assert_eq!(op, value);
+  }
+
+  #[test_case(random(), random())]
+  fn get_two_operands(v1: u8, v2: u8) {
+    let mut cpu = setup_sync(2);
+    let pc = cpu.program_counter.get() + 1;
+    cpu.memory.set(pc as u16, v1);
+    cpu.memory.set((pc + 1) as u16, v2);
+    let ops = cpu.get_two_operands();
+    assert_eq!(ops[0], v1);
+    assert_eq!(ops[1], v2);
+  }
+
+  #[test_case(non_wrapping_u8(), non_wrapping_u8(), 0; "Non wrap")]
+  #[test_case(wrapping_u8(), wrapping_u8(), 1; "Wrap")]
+  fn test_for_overflow(v1: u8, v2: u8, sync_count: usize) {
+    let mut cpu = setup_sync(sync_count);
+    cpu.test_for_overflow(v1, v2);
+    // if we're here, things worked
+    assert_eq!(true, true);
+  }
 }

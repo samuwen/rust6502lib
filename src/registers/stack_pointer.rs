@@ -1,4 +1,4 @@
-use log::{debug, trace, warn};
+use log::{debug, warn};
 /// Stack pointer works top down, so we start at 0xFF
 const START_INDEX: u8 = 0xFF;
 

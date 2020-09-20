@@ -49,21 +49,21 @@ impl Memory {
     if index <= STACK_MAX && index >= STACK_MIN {
       error!("Accessing memory from the stack improperly!");
     }
-    trace!("Setting value at index: {} to {}", index, value);
+    trace!("Setting value at index: {:X} to {:X}", index, value);
     self.mem[index as usize] = value;
   }
 
   /// Sets memory in the zero page. This takes less machine cycles than a normal write
   /// so we have a specific method to preserve cycle timing.
   pub fn set_zero_page(&mut self, index: u8, value: u8) {
-    trace!("Setting zero page at index: {} to {}", index, value);
+    trace!("Setting zero page at index: {:X} to {:X}", index, value);
     self.mem[index as usize] = value;
   }
 
   /// Gets memory from the zero page. This takes less machine cycles than a normal read
   /// so we have a sepcific method to preserve cycle timing.
   pub fn get_zero_page(&self, index: u8) -> u8 {
-    trace!("Getting value at index: {}", index);
+    trace!("Getting value at index: {:X}", index);
     self.mem[index as usize]
   }
 
@@ -72,7 +72,7 @@ impl Memory {
     if index <= STACK_MAX && index >= STACK_MIN {
       error!("Accessing memory from the stack improperly!");
     }
-    trace!("Getting value at index: {}", index);
+    trace!("Getting value at index: {:X}", index);
     self.mem[index as usize]
   }
 
@@ -80,7 +80,7 @@ impl Memory {
   /// We store our stack pointer as a u8, and our stack index starts at 0x100. So we
   /// logical OR the pointer val with 0x100 to get a value between 0x100 & 0x1FF.
   pub fn push_to_stack(&mut self, value: u8) {
-    debug!("Pushing {} to stack", value);
+    debug!("Pushing {:X} to stack", value);
     let index = (STACK_MIN | self.sp.push()) as usize;
     self.mem[index] = value;
   }
@@ -90,7 +90,7 @@ impl Memory {
   /// logical OR the pointer val with 0x100 to get a value between 0x100 & 0x1FF.
   pub fn pop_from_stack(&mut self) -> u8 {
     let index = (STACK_MIN | self.sp.pop()) as usize;
-    debug!("Popping {} from stack", self.mem[index]);
+    debug!("Popping {:X} from stack", self.mem[index]);
     self.mem[index]
   }
 
