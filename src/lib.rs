@@ -1728,8 +1728,11 @@ impl CPU {
     self.status_register.handle_n_flag(result, message);
   }
 
+  /// ROtate Left
+  ///
+  /// Takes a value and rotates bits to the left.
   fn rol(&mut self, value: u8) -> u8 {
-    trace!("ROL called with value: {}", value);
+    debug!("ROL called with value: {}", value);
     let result = self.rotate_left(value);
     // extra cycle for modification
     self.sync();
@@ -1738,37 +1741,50 @@ impl CPU {
     result
   }
 
+  /// Rotate left accumulator variant.
   pub fn rol_accumulator(&mut self) {
+    trace!("ROL accumulator called");
     let result = self.rol(self.accumulator.get());
     self.accumulator.set(result);
   }
 
+  /// Rotate left zero page variant
   pub fn rol_zero_page(&mut self) {
+    trace!("ROL zero page called");
     let (index, value) = self.zero_page("ROL");
     let result = self.rol(value);
     self.set_zero_page(index, result);
   }
 
+  /// Rotate left zero page x variant
   pub fn rol_zero_page_x(&mut self) {
+    trace!("ROL zero page x variant");
     let (index, value) = self.zp_reg("ROL", self.x_register.get());
     let result = self.rol(value);
     self.set_zero_page(index, result);
   }
 
+  /// Rotate left absolute variant
   pub fn rol_absolute(&mut self) {
+    trace!("ROL absolute variant");
     let (index, value) = self.absolute("ROL");
     let result = self.rol(value);
     self.set_u16(index, result);
   }
 
+  /// Rotate left absolute x variant
   pub fn rol_absolute_x(&mut self) {
+    trace!("ROL absolute x variant");
     let (index, value) = self.absolute_reg("ROL", self.x_register.get());
     let result = self.rol(value);
     self.set_u16(index, result);
   }
 
+  /// ROtate Right
+  ///
+  /// Takes a value and rotates bits to the right.
   fn ror(&mut self, value: u8) -> u8 {
-    trace!("ROR called with value: {}", value);
+    debug!("ROR called with value: {}", value);
     let result = self.rotate_right(value);
     // extra cycle for modification
     self.sync();
@@ -1777,30 +1793,40 @@ impl CPU {
     result
   }
 
+  /// Rotate right accumulator variant
   pub fn ror_accumulator(&mut self) {
+    trace!("ROR accumulator called");
     let result = self.ror(self.accumulator.get());
     self.accumulator.set(result);
   }
 
+  /// Rotate right zero page variant
   pub fn ror_zero_page(&mut self) {
+    trace!("ROR zero page called");
     let (index, value) = self.zero_page("ROR");
     let result = self.ror(value);
     self.set_zero_page(index, result);
   }
 
+  /// Rotate right zero page x variant
   pub fn ror_zero_page_x(&mut self) {
+    trace!("ROR zero page x called");
     let (index, value) = self.zp_reg("ROR", self.x_register.get());
     let result = self.ror(value);
     self.set_zero_page(index, result);
   }
 
+  /// Rotate right absolute variant
   pub fn ror_absolute(&mut self) {
+    trace!("ROR absolute called");
     let (index, value) = self.absolute("ROR");
     let result = self.ror(value);
     self.set_u16(index, result);
   }
 
+  /// Rotate right absolute x variant
   pub fn ror_absolute_x(&mut self) {
+    trace!("ROR absolute x called");
     let (index, value) = self.absolute_reg("ROR", self.x_register.get());
     let result = self.ror(value);
     self.set_u16(index, result);
@@ -1809,7 +1835,7 @@ impl CPU {
   /// Illegal opcode.
   /// Rotate one bit right in memory, then add memory to accumulator (with
   /// carry).
-
+  ///
   /// Affects flags N V Z C
   pub fn rra(&mut self, value: u8) {
     let message = "RRA";
@@ -1829,12 +1855,20 @@ impl CPU {
     self.status_register.handle_z_flag(result, message);
   }
 
-  /// Return from interrupt
+  /// ReTurn from Interrupt
+  ///
+  /// Returns from an interrupt when called.
   pub fn rti(&mut self) {
+    debug!("RTI called");
     self.return_from_interrupt();
   }
 
+  /// ReTurn from Subroutine
+  ///
+  /// Returns from a subroutine. Retrieves the program counter value from the
+  /// stack and sets the program counter to it.
   pub fn rts(&mut self) {
+    debug!("RTS called");
     let lo = self.pop_from_stack();
     let hi = self.pop_from_stack();
     let index = u16::from_le_bytes([lo, hi]) + 1;
@@ -1845,9 +1879,14 @@ impl CPU {
     self.sync();
   }
 
+  /// SuBtract with Carry
+  ///
+  /// Takes a value and subtracts it from the accumulator. Affected by carry.
+  ///
+  /// Affects flags N V Z C
   pub fn sbc(&mut self, value: u8) {
     let message = "SBC";
-    trace!("{} called with value: 0x{:X}", message, value);
+    debug!("{} called with value: 0x{:X}", message, value);
     let (result, carry) = self.accumulator.get().overflowing_sub(value);
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
@@ -1856,22 +1895,27 @@ impl CPU {
     self.status_register.handle_c_flag(message, carry);
   }
 
+  /// SEt Carry flag
+  ///
+  /// Sets the carry flag
   pub fn sec(&mut self) {
-    self.status_register.set_flag(StatusBit::Carry);
-    // All ops require two bytes
-    self.sync();
+    debug!("SEC called");
+    self.set_flag(StatusBit::Carry);
   }
 
+  /// SEt Decimal flag
+  ///
+  /// Sets the decimal flag
   pub fn sed(&mut self) {
-    self.status_register.set_flag(StatusBit::Decimal);
-    // All ops require two bytes
-    self.sync();
+    debug!("SEC called");
+    self.set_flag(StatusBit::Decimal);
   }
 
+  /// SEt Interrupt flag
+  ///
+  /// Sets the interrupt flag
   pub fn sei(&mut self) {
-    self.status_register.set_flag(StatusBit::Interrupt);
-    // All ops require two bytes
-    self.sync();
+    self.set_flag(StatusBit::Interrupt);
   }
 
   /// Illegal opcode.
@@ -1902,37 +1946,65 @@ impl CPU {
     self.status_register.handle_n_flag(result, message);
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, zero page variant
   pub fn sta_zero_page(&mut self) {
+    debug!("STA zero page called");
     let index = self.zero_page_index("STA");
     self.set_zero_page(index, self.accumulator.get());
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, zero page x variant
   pub fn sta_zero_page_x(&mut self) {
+    debug!("STA zero page called");
     let index = self.zp_reg_index("STA", self.x_register.get());
     self.set_zero_page(index, self.accumulator.get());
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, absolute variant
   pub fn sta_absolute(&mut self) {
+    debug!("STA absolute called");
     let index = self.absolute_index("STA");
     self.set_u16(index, self.accumulator.get());
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, absolute x variant
   pub fn sta_absolute_x(&mut self) {
+    debug!("STA absolute x called");
     let (index, _) = self.absolute_reg("STA", self.x_register.get());
     self.set_u16(index, self.accumulator.get());
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, absolute y variant
   pub fn sta_absolute_y(&mut self) {
+    debug!("STA absolute y called");
     let (index, _) = self.absolute_reg("STA", self.y_register.get());
     self.set_u16(index, self.accumulator.get());
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, indexed x variant
   pub fn sta_indexed_x(&mut self) {
+    debug!("STA indexed x called");
     let (index, _) = self.indexed_x("STA");
     self.set_u16(index, self.accumulator.get());
   }
 
+  /// STore Accumulator
+  ///
+  /// Stores a value in the accumulator, indexed y variant
   pub fn sta_indexed_y(&mut self) {
+    debug!("STA indexed y called");
     let (index, _) = self.indexed_y("STA");
     self.set_u16(index, self.accumulator.get());
   }
@@ -1966,69 +2038,119 @@ impl CPU {
     self.nop();
   }
 
+  /// Transfer X register to Stack pointer
+  ///
+  /// Takes the value in the x register and loads the stack pointer with it
   pub fn txs(&mut self) {
+    debug!("TXS called");
     self.memory.set_stack_pointer(self.x_register.get());
     // extra instruction byte always happens
     self.sync();
   }
 
+  /// Transfer Stack pointer to X register
+  ///
+  /// Takes the value in the stack pointer and loads the x register with it
   pub fn tsx(&mut self) {
+    debug!("TSX called");
     self.x_register.set(self.memory.get_stack_pointer().get());
     // extra instruction byte always happens
     self.sync();
   }
 
+  /// PusH Accumulator
+  ///
+  /// Pushes the accumulator value to the stack
   pub fn pha(&mut self) {
+    debug!("PHA called");
     self.push_to_stack(self.accumulator.get());
     // extra instruction byte always happens
     self.sync();
   }
 
+  /// PulL Accumulator
+  ///
+  /// Pops the stack value and sets the accumulator to it
+  /// In 6502 parlance Pull means Pop from the stack.
   pub fn pla(&mut self) {
+    debug!("PLA called");
     let stack_value = self.pop_from_stack();
     self.accumulator.set(stack_value);
     // extra instruction byte always happens
     self.sync();
   }
 
+  /// PusH Processor status
+  ///
+  /// Pushes the status register onto the stack
   pub fn php(&mut self) {
+    debug!("PHP called");
     self.push_to_stack(self.status_register.get_register());
     // extra instruction byte always happens
     self.sync();
   }
 
+  /// PulL Processor status
+  ///
+  /// Pops the stack value and sets the status register to it
+  /// In 6502 parlance Pull means Pop from the stack.
   pub fn plp(&mut self) {
+    debug!("PLP called");
     let stack = self.pop_from_stack();
     self.status_register.set(stack);
     // extra instruction byte always happens
     self.sync();
   }
 
+  /// STore X register
+  ///
+  /// Takes the value in the x register and stores it in memory.
+  /// Zero page variant
   pub fn stx_zero_page(&mut self) {
     let index = self.zero_page_index("STX");
     self.set_zero_page(index, self.x_register.get());
   }
 
+  /// STore X register
+  ///
+  /// Takes the value in the x register and stores it in memory.
+  /// Zero page y variant
   pub fn stx_zero_page_y(&mut self) {
     let index = self.zp_reg_index("STX", self.y_register.get());
     self.set_zero_page(index, self.x_register.get());
   }
 
+  /// STore X register
+  ///
+  /// Takes the value in the x register and stores it in memory.
+  /// Absolute variant
   pub fn stx_absolute(&mut self) {
     let index = self.absolute_index("STX");
     self.set_u16(index, self.x_register.get());
   }
 
+  /// STore Y register
+  ///
+  /// Takes the value in the y register and stores it in memory.
+  /// Zero page variant
   pub fn sty_zero_page(&mut self) {
     let index = self.zero_page_index("STY");
     self.set_zero_page(index, self.y_register.get());
   }
 
+  /// STore Y register
+  ///
+  /// Takes the value in the x register and stores it in memory.
+  /// Zero page x variant
   pub fn sty_zero_page_x(&mut self) {
     let index = self.zp_reg_index("STY", self.x_register.get());
     self.set_zero_page(index, self.y_register.get());
   }
 
+  /// STore Y register
+  ///
+  /// Takes the value in the x register and stores it in memory.
+  /// Absolute variant
   pub fn sty_absolute(&mut self) {
     let index = self.absolute_index("STY");
     self.set_u16(index, self.y_register.get());
@@ -2058,6 +2180,7 @@ impl CPU {
   }
 }
 
+/// Prints pretty output about the status of the CPU.
 impl Display for CPU {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
     write!(
