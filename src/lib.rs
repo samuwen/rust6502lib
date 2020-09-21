@@ -543,7 +543,7 @@ impl CPU {
   fn zp_reg(&mut self, name: &str, reg_val: u8) -> (u8, u8) {
     let op = self.get_single_operand();
     debug!("{} zero page x called with operand: 0x{:X}", name, op);
-    // waste a cycle
+    // waste a cycle - bug in processor causes it to read the value
     self.get_zero_page(op);
     let index = op.wrapping_add(reg_val);
     (index, self.get_zero_page(index))
@@ -553,7 +553,7 @@ impl CPU {
   fn zp_reg_index(&mut self, name: &str, reg_val: u8) -> u8 {
     let op = self.get_single_operand();
     debug!("{} zero page x called with operand: 0x{:X}", name, op);
-    // waste a cycle
+    // waste a cycle - bug in processor causes it to read the value
     self.get_zero_page(op);
     op.wrapping_add(reg_val)
   }
@@ -592,9 +592,9 @@ impl CPU {
     let ops = self.get_two_operands();
     let index = u16::from_le_bytes(ops);
     debug!("{} absolute reg called with index: 0x{:X}", name, index);
-    let total = index.wrapping_add(reg as u16);
+    let index = index.wrapping_add(reg as u16);
     self.test_for_overflow(ops[1], reg);
-    (index, self.get_u16(total))
+    (index, self.get_u16(index))
   }
 
   /// Callback version of Absolute X addressing mode.
@@ -609,7 +609,7 @@ impl CPU {
     cb(self, value);
   }
 
-  /// AKA Indexed indirect AKA pre-indexed. Costs 4 cycles
+  /// AKA Indexed indirect AKA pre-indexed. Costs 5 cycles
   fn indexed_x(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     debug!("{} indexed x called with operand: 0x{:X}", name, op);
@@ -617,6 +617,8 @@ impl CPU {
     let lo = self.get_zero_page(modified_op);
     let hi = self.get_zero_page(modified_op.wrapping_add(1));
     let index = u16::from_le_bytes([lo, hi]);
+    // not sure where this extra cycle comes from.
+    self.sync();
     (index, self.get_u16(index))
   }
 
@@ -626,7 +628,7 @@ impl CPU {
     cb(self, value);
   }
 
-  /// AKA Indirect indexed AKA post-indexed. Costs 4 cycles
+  /// AKA Indirect indexed AKA post-indexed. Costs 5 cycles
   fn indexed_y(&mut self, name: &str) -> (u16, u8) {
     let op = self.get_single_operand();
     debug!("{} indexed y called with operand: 0x{:X}", name, op);
@@ -634,6 +636,7 @@ impl CPU {
     let lo = self.get_zero_page(op);
     let hi = self.get_zero_page(op.wrapping_add(1));
     let index = u16::from_le_bytes([lo, hi]);
+    let index = index.wrapping_add(y_val as u16);
     self.test_for_overflow(hi, y_val);
     (index, self.memory.get_u16(index))
   }
@@ -2222,6 +2225,16 @@ mod tests {
     rng.gen_range(0x00, 0x7F)
   }
 
+  fn wrapping_u16() -> u16 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(0x8000, 0xFFFF)
+  }
+
+  fn non_wrapping_u16() -> u16 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(0x0000, 0x7FFF)
+  }
+
   #[test]
   fn new() {
     let (_, rx) = mpsc::channel();
@@ -2347,5 +2360,104 @@ mod tests {
     cpu.test_for_overflow(v1, v2);
     // if we're here, things worked
     assert_eq!(true, true);
+  }
+
+  // NOTES FOR SYNC COUNTS IN THIS SECTION
+  // Syncs are not counting the initial opcode read, so all sync counts
+  // are one less than in the actual execution.
+
+  #[test_case(random())]
+  fn immediate(value: u8) {
+    let mut cpu = setup_sync(1);
+    let pc = cpu.program_counter.get();
+    cpu.memory.set((pc + 1) as u16, value);
+    let result = cpu.immediate("Test");
+    assert_eq!(value, result);
+  }
+
+  #[test_case(random(), random())]
+  fn zero_page(value: u8, index: u8) {
+    let mut cpu = setup_sync(2);
+    let pc = cpu.program_counter.get();
+    cpu.memory.set((pc + 1) as u16, index);
+    cpu.memory.set_zero_page(index, value);
+    let (i_result, v_result) = cpu.zero_page("Test");
+    assert_eq!(value, v_result);
+    assert_eq!(index, i_result);
+  }
+
+  #[test_case(random(), 0x10, 0x20; "No wrap")]
+  #[test_case(random(), wrapping_u8(), wrapping_u8(); "Wrap")]
+  fn zero_page_reg(value: u8, index: u8, reg: u8) {
+    let mut cpu = setup_sync(3);
+    let pc = cpu.program_counter.get();
+    cpu.memory.set((pc + 1) as u16, index);
+    let index = index.wrapping_add(reg);
+    cpu.memory.set_zero_page(index, value);
+    let (i_result, v_result) = cpu.zp_reg("Test", reg);
+    assert_eq!(value, v_result);
+    assert_eq!(index, i_result);
+  }
+
+  #[test_case(random(), random())]
+  fn absolute(value: u8, index: u16) {
+    let mut cpu = setup_sync(3);
+    let pc = cpu.program_counter.get();
+    let ops = index.to_le_bytes();
+    cpu.memory.set((pc + 1) as u16, ops[0]);
+    cpu.memory.set((pc + 2) as u16, ops[1]);
+    cpu.memory.set(index, value);
+    let (i_result, v_result) = cpu.absolute("Test");
+    assert_eq!(value, v_result);
+    assert_eq!(index, i_result);
+  }
+
+  #[test_case(random(), non_wrapping_u16(), non_wrapping_u8(), 3; "Non wrapping")]
+  #[test_case(random(), wrapping_u16(), wrapping_u8(), 4; "Wrapping")]
+  fn absolute_reg(value: u8, index: u16, reg: u8, sync_count: usize) {
+    let mut cpu = setup_sync(sync_count);
+    let pc = cpu.program_counter.get();
+    let ops = index.to_le_bytes();
+    cpu.memory.set((pc + 1) as u16, ops[0]);
+    cpu.memory.set((pc + 2) as u16, ops[1]);
+    let index = index.wrapping_add(reg as u16);
+    cpu.memory.set(index, value);
+    let (i_result, v_result) = cpu.absolute_reg("Test", reg);
+    assert_eq!(value, v_result);
+    assert_eq!(index, i_result);
+  }
+
+  #[test_case(random(), non_wrapping_u16(), non_wrapping_u8(), non_wrapping_u8(), 5; "No wrap")]
+  #[test_case(random(), wrapping_u16(), wrapping_u8(), wrapping_u8(), 5; "Wrap")]
+  fn indexed_x(value: u8, index: u16, reg: u8, op: u8, sync_count: usize) {
+    let mut cpu = setup_sync(sync_count);
+    let pc = cpu.program_counter.get();
+    cpu.x_register.set(reg);
+    cpu.memory.set((pc + 1) as u16, op);
+    let mod_op = op.wrapping_add(reg);
+    let ops = index.to_le_bytes();
+    cpu.memory.set_zero_page(mod_op, ops[0]);
+    cpu.memory.set_zero_page(mod_op.wrapping_add(1), ops[1]);
+    cpu.memory.set(index, value);
+    let (i_result, v_result) = cpu.indexed_x("test");
+    assert_eq!(value, v_result);
+    assert_eq!(index, i_result);
+  }
+
+  #[test_case(random(), non_wrapping_u16(), non_wrapping_u8(), non_wrapping_u8(), 4; "No wrap")]
+  #[test_case(random(), wrapping_u16(), wrapping_u8(), wrapping_u8(), 5; "Wrap")]
+  fn indexed_y(value: u8, index: u16, reg: u8, op: u8, sync_count: usize) {
+    let mut cpu = setup_sync(sync_count);
+    let pc = cpu.program_counter.get();
+    cpu.y_register.set(reg);
+    cpu.memory.set((pc + 1) as u16, op);
+    let ops = index.to_le_bytes();
+    cpu.memory.set_zero_page(op, ops[0]);
+    cpu.memory.set_zero_page(op.wrapping_add(1), ops[1]);
+    let index = index.wrapping_add(reg as u16);
+    cpu.memory.set(index, value);
+    let (i_result, v_result) = cpu.indexed_y("test");
+    assert_eq!(value, v_result);
+    assert_eq!(index, i_result);
   }
 }
