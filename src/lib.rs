@@ -2605,9 +2605,9 @@ mod tests {
   #[test_case(0xFFFA, 0xFFFB, random(), random())]
   fn interrupt(lo: u16, hi: u16, v1: u8, v2: u8) {
     let mut cpu = setup_sync(7);
-    let address = cpu.interrupt(lo, hi);
     cpu.memory.set(lo, v1);
     cpu.memory.set(hi, v2);
+    let address = cpu.interrupt(lo, hi);
     assert_eq!(address, u16::from_le_bytes([v1, v2]));
     assert_eq!(cpu.memory.get_u16(0x1FF), 0x00);
     assert_eq!(cpu.memory.get_u16(0x1FE), 0x80);

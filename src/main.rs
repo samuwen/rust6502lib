@@ -1,6 +1,6 @@
-use emu_attack::*;
 use flexi_logger::{detailed_format, Logger};
 use log::debug;
+use rust6502lib::*;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
