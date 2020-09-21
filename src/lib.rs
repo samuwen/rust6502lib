@@ -638,7 +638,7 @@ impl CPU {
     let index = u16::from_le_bytes([lo, hi]);
     let index = index.wrapping_add(y_val as u16);
     self.test_for_overflow(hi, y_val);
-    (index, self.memory.get_u16(index))
+    (index, self.get_u16(index))
   }
 
   /// Callback version of indexed y addressing mode.
