@@ -49,15 +49,17 @@ impl ProgramCounter {
   /// Adds the specified value to the program counter, wrapping if overflow.
   /// Tests if the addition crossed a page boundary and returns true if it did.
   pub fn increase(&mut self, amount: u8) -> bool {
+    let did_cross = self.test_page_boundary_add(amount);
     self.value = self.value.wrapping_add(amount as u16);
-    self.test_page_boundary_add(amount)
+    did_cross
   }
 
   /// Subtracts the specified value to the program counter, wrapping if overflow.
   /// Tests if the subtraction crossed a page boundary and returns true if it did.
   pub fn decrease(&mut self, amount: u8) -> bool {
+    let did_cross = self.test_page_boundary_sub(amount);
     self.value = self.value.wrapping_sub(amount as u16);
-    self.test_page_boundary_sub(amount)
+    did_cross
   }
 
   /// Tests if an addition would cross a page boundary and returns true if it would.

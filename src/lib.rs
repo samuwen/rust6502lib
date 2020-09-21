@@ -657,7 +657,7 @@ impl CPU {
     if condition {
       let overflow = match op > 0x7F {
         // Funky syntax is two's complement. Cannot have negative unsigned.
-        true => self.program_counter.decrease(!op + 1),
+        true => self.program_counter.decrease(!(op + 1)),
         false => self.program_counter.increase(op),
       };
       if overflow {
@@ -2279,7 +2279,7 @@ mod tests {
     let mut cpu = new_cpu();
     let mut vector = vec![];
     for _ in 0..0xFF {
-      vector.push(random());
+      vector.push(wrapping_u8());
     }
     cpu.load_program_into_memory(&vector, 0);
     assert_eq!(cpu.memory.get_zero_page(0x92) > 0, true);
@@ -2459,5 +2459,18 @@ mod tests {
     let (i_result, v_result) = cpu.indexed_y("test");
     assert_eq!(value, v_result);
     assert_eq!(index, i_result);
+  }
+
+  #[test_case(true, non_wrapping_u8(), 1; "Addition")]
+  #[test_case(true, wrapping_u8(), 2; "Subtraction")]
+  fn branch(condition: bool, op: u8, sync_count: usize) {
+    let mut cpu = setup_sync(sync_count);
+    let pc = cpu.program_counter.get();
+    cpu.branch(condition, op);
+    let result = match op > 0x7F {
+      true => pc - !(op + 1) as usize,
+      false => pc + op as usize,
+    };
+    assert_eq!(result, cpu.program_counter.get());
   }
 }
