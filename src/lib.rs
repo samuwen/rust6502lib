@@ -2473,4 +2473,11 @@ mod tests {
     };
     assert_eq!(result, cpu.program_counter.get());
   }
+
+  #[test]
+  fn branch() {
+    let mut cpu = setup_sync(1);
+    cpu.branch(false, 0x15);
+    assert_eq!(cpu.program_counter.get(), STARTING_MEMORY_BLOCK as usize);
+  }
 }
