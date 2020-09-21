@@ -2574,4 +2574,46 @@ mod tests {
     );
     assert_eq!(result, expected);
   }
+
+  #[test_case(StatusBit::Carry; "Set carry")]
+  #[test_case(StatusBit::Zero; "Set zero")]
+  #[test_case(StatusBit::Negative; "Set negative")]
+  #[test_case(StatusBit::Decimal; "Set decimal")]
+  #[test_case(StatusBit::Overflow; "Set overflow")]
+  #[test_case(StatusBit::Interrupt; "Set interrupt")]
+  #[test_case(StatusBit::Break; "Set break")]
+  fn set_flag(flag: StatusBit) {
+    let mut cpu = setup_sync(1);
+    cpu.set_flag(flag);
+    assert_eq!(cpu.status_register.is_flag_set(flag), true);
+  }
+
+  #[test_case(StatusBit::Carry; "Clear carry")]
+  #[test_case(StatusBit::Zero; "Clear zero")]
+  #[test_case(StatusBit::Negative; "Clear negative")]
+  #[test_case(StatusBit::Decimal; "Clear decimal")]
+  #[test_case(StatusBit::Overflow; "Clear overflow")]
+  #[test_case(StatusBit::Interrupt; "Clear interrupt")]
+  #[test_case(StatusBit::Break; "Clear break")]
+  fn clear_flag(flag: StatusBit) {
+    let mut cpu = setup_sync(1);
+    cpu.status_register.set_flag(flag);
+    cpu.clear_flag(flag);
+    assert_eq!(cpu.status_register.is_flag_set(flag), false);
+  }
+
+  #[test_case(0xFFFA, 0xFFFB, random(), random())]
+  fn interrupt(lo: u16, hi: u16, v1: u8, v2: u8) {
+    let mut cpu = setup_sync(7);
+    let address = cpu.interrupt(lo, hi);
+    cpu.memory.set(lo, v1);
+    cpu.memory.set(hi, v2);
+    assert_eq!(address, u16::from_le_bytes([v1, v2]));
+    assert_eq!(cpu.memory.get_u16(0x1FF), 0x00);
+    assert_eq!(cpu.memory.get_u16(0x1FE), 0x80);
+    assert_eq!(
+      cpu.memory.get_u16(0x1FD),
+      cpu.status_register.get_register()
+    );
+  }
 }
