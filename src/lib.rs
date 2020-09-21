@@ -683,7 +683,6 @@ impl CPU {
     if result == 0 {
       self.status_register.set_flag(StatusBit::Zero);
     }
-    // Carry is true only when the test value is greater than the register value.
     if !carry {
       self.status_register.set_flag(StatusBit::Carry);
     }
@@ -742,7 +741,7 @@ impl CPU {
     if self.status_register.is_flag_set(StatusBit::Carry) {
       result |= 0x1;
     }
-    match value & 0x80 == 0x80 {
+    match (value & 0x80) == 0x80 {
       true => self.status_register.set_flag(StatusBit::Carry),
       false => self.status_register.clear_flag(StatusBit::Carry),
     }
@@ -2475,9 +2474,104 @@ mod tests {
   }
 
   #[test]
-  fn branch() {
-    let mut cpu = setup_sync(1);
+  fn branch_not_taken() {
+    let mut cpu = setup_sync(0);
     cpu.branch(false, 0x15);
     assert_eq!(cpu.program_counter.get(), STARTING_MEMORY_BLOCK as usize);
+  }
+
+  #[test_case(0x10, 0x20; "Not equal, negative, carried")]
+  #[test_case(0x20, 0x10; "Not equal, positive, not carried")]
+  #[test_case(0x20, 0x20; "Equal, positive, carried")]
+  #[test_case(0x01, 0xFF; "Not equal, positive, carried")]
+  fn generic_compare(reg_value: u8, test_value: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.generic_compare(test_value, reg_value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      reg_value >= test_value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Zero),
+      test_value == reg_value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Negative),
+      reg_value.wrapping_sub(test_value) >= 0x80
+    );
+  }
+
+  #[test_case(0; "Zero")]
+  #[test_case(0xAA; "Negative")]
+  #[test_case(0x12; "Positive")]
+  fn register_operation(value: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.register_operation(value, "test");
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Negative),
+      value >= 0x80
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Zero),
+      value == 0x00
+    );
+  }
+
+  #[test_case(0x10, false, 0x8, false; "Normal no mods")]
+  #[test_case(0x10, true, 0x88, false; "With carry set prior")]
+  #[test_case(0x51, false, 0x28, true; "Expecting to carry")]
+  #[test_case(0x51, true, 0xA8, true; "With carry set and expecting to carry")]
+  fn rotate_right(value: u8, set_carry: bool, expected: u8, expected_carry: bool) {
+    let mut cpu = setup_sync(0);
+    if set_carry {
+      cpu.status_register.set_flag(StatusBit::Carry);
+    }
+    let result = cpu.rotate_right(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      expected_carry
+    );
+    assert_eq!(result, expected);
+  }
+
+  #[test_case(0x10, 0x8, false; "Normal no mods")]
+  #[test_case(0x51, 0x28, true; "Expecting to carry")]
+  fn shift_right(value: u8, expected: u8, expected_carry: bool) {
+    let mut cpu = setup_sync(0);
+    let result = cpu.shift_right(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      expected_carry
+    );
+    assert_eq!(result, expected);
+  }
+
+  #[test_case(0x10, false, 0x20, false; "Normal no mods")]
+  #[test_case(0x10, true, 0x21, false; "With carry set prior")]
+  #[test_case(0x91, false, 0x22, true; "Expecting to carry")]
+  #[test_case(0x91, true, 0x23, true; "With carry set and expecting to carry")]
+  fn rotate_left(value: u8, set_carry: bool, expected: u8, expected_carry: bool) {
+    let mut cpu = setup_sync(0);
+    if set_carry {
+      cpu.status_register.set_flag(StatusBit::Carry);
+    }
+    let result = cpu.rotate_left(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      expected_carry
+    );
+    assert_eq!(result, expected);
+  }
+
+  #[test_case(0x10, 0x20, false; "Normal no mods")]
+  #[test_case(0x91, 0x22, true; "Expecting to carry")]
+  fn shift_left(value: u8, expected: u8, expected_carry: bool) {
+    let mut cpu = setup_sync(0);
+    let result = cpu.shift_left(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      expected_carry
+    );
+    assert_eq!(result, expected);
   }
 }
