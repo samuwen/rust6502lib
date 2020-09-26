@@ -1003,39 +1003,21 @@ impl CPU {
       true => 1,
       false => 0,
     };
-    let (val, acc) = match self.status_register.is_flag_set(StatusBit::Decimal) {
-      true => {
-        let val_result = CPU::convert_num_to_decimal(value);
-        let acc_result = CPU::convert_num_to_decimal(self.accumulator.get());
-        if val_result.is_ok() && acc_result.is_ok() {
-          (val_result.unwrap(), acc_result.unwrap())
-        } else {
-          let temp = ((value & 0x0F) + (self.accumulator.get() & 0x0F) + modifier) as u16;
-          let temp = match temp >= 0x0A {
-            true => ((temp + 0x06) & 0x0F) + 0x10,
-            false => temp,
-          };
-          let result = ((value & 0xF0) + (self.accumulator.get() & 0xF0)) as u16 + temp;
-          let result = match result >= 0xA0 {
-            true => result + 0x60,
-            false => result,
-          };
-          let acc_result = result & 0xFF;
-          let carry_result = result & 0xFF00;
-          (1, 2)
-        }
+    let result = match self.status_register.is_flag_set(StatusBit::Decimal) {
+      true => self.decimal_addition(self.accumulator.get(), value, modifier),
+      false => {
+        let first = self.accumulator.get().overflowing_add(value);
+        let second = first.0.overflowing_add(modifier);
+        let result = second.0;
+        let carry = first.1 || second.1;
+        self.status_register.handle_n_flag(result, message);
+        self.status_register.handle_v_flag(result, message, carry);
+        self.status_register.handle_z_flag(result, message);
+        self.status_register.handle_c_flag(message, carry);
+        result
       }
-      false => (value, self.accumulator.get()),
     };
-    let first = acc.overflowing_add(val);
-    let second = first.0.overflowing_add(modifier);
-    let result = second.0;
-    let carry = first.1 || second.1;
     self.accumulator.set(result);
-    self.status_register.handle_n_flag(result, message);
-    self.status_register.handle_v_flag(result, message, carry);
-    self.status_register.handle_z_flag(result, message);
-    self.status_register.handle_c_flag(message, carry);
   }
 
   /// AND accumulator
@@ -1990,23 +1972,22 @@ impl CPU {
       true => 0,
       false => 1,
     };
-    // let (val, acc) = match self.status_register.is_flag_set(StatusBit::Decimal) {
-    //   true => (
-    //     CPU::convert_num_to_decimal(value),
-    //     CPU::convert_num_to_decimal(self.accumulator.get()),
-    //   ),
-    //   false => (value, self.accumulator.get()),
-    // };
-    let (val, acc) = (value, self.accumulator.get());
-    let first = acc.overflowing_sub(val);
-    let second = first.0.overflowing_sub(modifier);
-    let result = second.0;
-    let carry = first.1 || second.1;
+    let result = match self.status_register.is_flag_set(StatusBit::Decimal) {
+      true => self.decimal_subtraction(self.accumulator.get(), value, modifier),
+      false => {
+        let (val, acc) = (value, self.accumulator.get());
+        let first = acc.overflowing_sub(val);
+        let second = first.0.overflowing_sub(modifier);
+        let result = second.0;
+        let carry = first.1 || second.1;
+        self.status_register.handle_n_flag(result, message);
+        self.status_register.handle_v_flag(result, message, carry);
+        self.status_register.handle_z_flag(result, message);
+        self.status_register.handle_c_flag(message, carry);
+        result
+      }
+    };
     self.accumulator.set(result);
-    self.status_register.handle_n_flag(result, message);
-    self.status_register.handle_v_flag(result, message, carry);
-    self.status_register.handle_z_flag(result, message);
-    self.status_register.handle_c_flag(message, carry);
   }
 
   /// SEt Carry flag
@@ -2768,28 +2749,6 @@ mod tests {
     assert_eq!(cpu.status_register.is_flag_set(StatusBit::Interrupt), false);
   }
 
-  #[test_case(random(), random())]
-  fn aac(value: u8, acc: u8) {
-    let mut cpu = setup_sync(0);
-    cpu.accumulator.set(acc);
-    cpu.aac(value);
-    let result = value & acc;
-    assert_eq!(cpu.accumulator.get(), result);
-    assert_eq!(
-      cpu.status_register.is_flag_set(StatusBit::Carry),
-      result >= 0x80
-    );
-  }
-
-  #[test_case(random(), random(), random())]
-  fn aax(index: u16, acc: u8, x: u8) {
-    let mut cpu = setup_sync(1);
-    cpu.x_register.set(x);
-    cpu.accumulator.set(acc);
-    cpu.aax(index);
-    assert_eq!(cpu.memory.get_u16(index), x & acc);
-  }
-
   #[test_case(0x58, 0x46, 1, 0x05, true)]
   #[test_case(0x12, 0x34, 0, 0x46, false)]
   #[test_case(0x15, 0x26, 0, 0x41, false)]
@@ -2817,5 +2776,42 @@ mod tests {
     let result = cpu.decimal_subtraction(v1, v2, carry);
     assert_eq!(result, expected);
     assert_eq!(cpu.status_register.is_flag_set(StatusBit::Carry), carry_set);
+  }
+
+  #[test_case(random(), random())]
+  fn aac(value: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.aac(value);
+    let result = value & acc;
+    assert_eq!(cpu.accumulator.get(), result);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      result >= 0x80
+    );
+  }
+
+  #[test_case(random(), random(), random())]
+  fn aax(index: u16, acc: u8, x: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(x);
+    cpu.accumulator.set(acc);
+    cpu.aax(index);
+    assert_eq!(cpu.memory.get_u16(index), x & acc);
+  }
+
+  #[test_case(0x58, 0x46, true, false, 0x9F; "test hex addition")]
+  #[test_case(0x58, 0x46, true, true, 0x05; "test dec addition")]
+  fn adc(acc: u8, value: u8, c: bool, d: bool, expected: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    if c {
+      cpu.status_register.set_flag(StatusBit::Carry);
+    }
+    if d {
+      cpu.status_register.set_flag(StatusBit::Decimal);
+    }
+    cpu.adc(value);
+    assert_eq!(cpu.accumulator.get(), expected);
   }
 }
