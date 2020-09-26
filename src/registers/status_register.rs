@@ -78,18 +78,21 @@ impl StatusRegister {
 
   /// Sets or clears the overflow flag. Logs out the calling method for tracking.
   pub fn handle_v_flag(&mut self, value: u8, message: &str, carry: bool) {
-    if value > 0x7F {
-      trace!("{} setting overflow bit", message);
-      self.set_flag(StatusBit::Overflow);
-    } else if value == 0x7F && carry {
-      trace!("{} setting overflow bit", message);
-      self.set_flag(StatusBit::Overflow);
+    match carry {
+      false => match value > 0x7F {
+        true => self.set_flag(StatusBit::Overflow),
+        false => self.clear_flag(StatusBit::Overflow),
+      },
+      true => match value > 0x80 {
+        true => self.set_flag(StatusBit::Overflow),
+        false => self.clear_flag(StatusBit::Overflow),
+      },
     }
   }
 
   /// Sets or clears the negative flag. Logs out the calling method for tracking.
   pub fn handle_n_flag(&mut self, value: u8, message: &str) {
-    if value >> 7 == 1 {
+    if (value & 0x80) >> 7 == 1 {
       trace!("{} setting negative bit", message);
       self.set_flag(StatusBit::Negative);
     } else {
@@ -225,7 +228,7 @@ mod tests {
   #[test]
   fn handle_overflow_set_carry() {
     let mut reg = StatusRegister::new();
-    reg.handle_v_flag(0x7F, "test", true);
+    reg.handle_v_flag(0x81, "test", true);
     assert_eq!(reg.is_flag_set(StatusBit::Overflow), true);
   }
 

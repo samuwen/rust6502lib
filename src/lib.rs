@@ -779,6 +779,83 @@ impl CPU {
     self.sync();
   }
 
+  fn convert_num_to_decimal(value: u8) -> std::result::Result<u8, std::num::ParseIntError> {
+    let mut hi_nib = ((value & 0xF0) >> 4).to_string();
+    let lo_nib = (value & 0x0F).to_string();
+    hi_nib.push_str(&lo_nib);
+    u8::from_str_radix(&hi_nib, 10)
+  }
+
+  fn decimal_addition(&mut self, acc_val: u8, val: u8, modifier: u8) -> u8 {
+    trace!("Decimal addition. Hope this works!");
+    let message = "D ADC";
+    // Setup some closures to make life less painful
+    let mod_result_acc = |v| (v & 0xFF) as u8;
+    let mod_result_car = |v| (v & 0xFF00) > 1;
+    let match_lo = |v| (v & 0x0F) as u16;
+    let match_hi = |v| (v & 0xF0) as u16;
+    // Get the low nibble of both values and add them with modifier
+    // u16 so we don't deal with overflow yet
+    let temp = match_lo(val) + match_lo(acc_val) + modifier as u16;
+    let temp = match temp >= 0x0A {
+      // If we're above the last valid decimal value, do some more modification
+      true => ((temp + 0x06) & 0x0F) + 0x10,
+      false => temp,
+    };
+    // Get the hi nibble of both values and add them to our lo nibble calc
+    let result = (match_hi(val) + match_hi(acc_val)) as u16 + temp;
+    // Handle N and V flags here BEFORE we proceed
+    self.status_register.handle_n_flag(result as u8, message);
+    self
+      .status_register
+      .handle_v_flag(mod_result_acc(result), message, mod_result_car(result));
+    // If our hi nibble is above the last valid decimal value, additional modification
+    let result = match result >= 0xA0 {
+      true => result + 0x60,
+      false => result,
+    };
+    let (result, carry) = (mod_result_acc(result), mod_result_car(result));
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_c_flag(message, carry);
+    result
+  }
+
+  // If the carry is clear, modifier is 1
+  fn decimal_subtraction(&mut self, acc_val: u8, val: u8, modifier: u8) -> u8 {
+    trace!("Decimal subtraction. Hope this works!");
+    let message = "D SBC";
+    // Setup some closures to make life less painful
+    let mod_result_acc = |v| (v & 0xFF) as u8;
+    let mod_result_car = |v| !(v > acc_val && v > val);
+    let match_lo = |v| v & 0x0F;
+    let match_hi = |v| (v & 0xF0);
+    // Get the low nibble of both values and subtract them with modifier
+    let (temp, over1) = match_lo(acc_val).overflowing_sub(match_lo(val));
+    let (temp, over2) = temp.overflowing_sub(modifier);
+    // result is negative
+    let temp = match over1 || over2 {
+      true => ((temp - 0x06) & 0x0F).wrapping_sub(0x10),
+      false => temp,
+    };
+    // Get the hi nibble of both values and subtract them to our lo nibble calc
+    let (result, over1) = match_hi(acc_val).overflowing_sub(match_hi(val));
+    let result = result.wrapping_add(temp);
+    // Handle N and V flags here BEFORE we proceed
+    self.status_register.handle_n_flag(result as u8, message);
+    self
+      .status_register
+      .handle_v_flag(mod_result_acc(result), message, mod_result_car(result));
+    // If our hi nibble is above the last valid decimal value, additional modification
+    let result = match over1 {
+      true => result - 0x60,
+      false => result,
+    };
+    let (result, carry) = (mod_result_acc(result), mod_result_car(result));
+    self.status_register.handle_z_flag(result, message);
+    self.status_register.handle_c_flag(message, carry);
+    result
+  }
+
   /*
   ============================================================================================
                                   Interrupts
@@ -860,13 +937,14 @@ impl CPU {
   */
 
   /// Illegal opcode.
-  /// Two opcode values reference this, both are immediate mode.
+  /// AND byte with accumulator. If result is negative then carry is set.
   ///
   /// Affects flags N Z C. Carry is set if result is negative
   pub fn aac(&mut self, value: u8) {
     let message = "AAC";
     warn!("{} called. Something might be borked.", message);
     let result = value & self.accumulator.get();
+    self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_z_flag(result, message);
     self.status_register.handle_c_flag(
@@ -877,7 +955,6 @@ impl CPU {
 
   /// Illegal opcode.
   /// And x register with accumulator and store result in memory.
-  /// Four possible codes, zero page, zero page y, indirect x, and absolute
   ///
   /// Affects flags N, Z
   pub fn aax(&mut self, index: u16) {
@@ -913,7 +990,6 @@ impl CPU {
     self.aax(index);
   }
 
-  // TODO: Add BCD
   /// ADd with Carry
   ///
   /// Adds the value given to the accumulator including the carry.
@@ -927,10 +1003,34 @@ impl CPU {
       true => 1,
       false => 0,
     };
-    let (result, carry) = self
-      .accumulator
-      .get()
-      .overflowing_add(value.wrapping_add(modifier));
+    let (val, acc) = match self.status_register.is_flag_set(StatusBit::Decimal) {
+      true => {
+        let val_result = CPU::convert_num_to_decimal(value);
+        let acc_result = CPU::convert_num_to_decimal(self.accumulator.get());
+        if val_result.is_ok() && acc_result.is_ok() {
+          (val_result.unwrap(), acc_result.unwrap())
+        } else {
+          let temp = ((value & 0x0F) + (self.accumulator.get() & 0x0F) + modifier) as u16;
+          let temp = match temp >= 0x0A {
+            true => ((temp + 0x06) & 0x0F) + 0x10,
+            false => temp,
+          };
+          let result = ((value & 0xF0) + (self.accumulator.get() & 0xF0)) as u16 + temp;
+          let result = match result >= 0xA0 {
+            true => result + 0x60,
+            false => result,
+          };
+          let acc_result = result & 0xFF;
+          let carry_result = result & 0xFF00;
+          (1, 2)
+        }
+      }
+      false => (value, self.accumulator.get()),
+    };
+    let first = acc.overflowing_add(val);
+    let second = first.0.overflowing_add(modifier);
+    let result = second.0;
+    let carry = first.1 || second.1;
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_v_flag(result, message, carry);
@@ -1886,7 +1986,22 @@ impl CPU {
   pub fn sbc(&mut self, value: u8) {
     let message = "SBC";
     debug!("{} called with value: 0x{:X}", message, value);
-    let (result, carry) = self.accumulator.get().overflowing_sub(value);
+    let modifier = match self.status_register.is_flag_set(StatusBit::Carry) {
+      true => 0,
+      false => 1,
+    };
+    // let (val, acc) = match self.status_register.is_flag_set(StatusBit::Decimal) {
+    //   true => (
+    //     CPU::convert_num_to_decimal(value),
+    //     CPU::convert_num_to_decimal(self.accumulator.get()),
+    //   ),
+    //   false => (value, self.accumulator.get()),
+    // };
+    let (val, acc) = (value, self.accumulator.get());
+    let first = acc.overflowing_sub(val);
+    let second = first.0.overflowing_sub(modifier);
+    let result = second.0;
+    let carry = first.1 || second.1;
     self.accumulator.set(result);
     self.status_register.handle_n_flag(result, message);
     self.status_register.handle_v_flag(result, message, carry);
@@ -2602,18 +2717,105 @@ mod tests {
     assert_eq!(cpu.status_register.is_flag_set(flag), false);
   }
 
-  #[test_case(0xFFFA, 0xFFFB, random(), random())]
-  fn interrupt(lo: u16, hi: u16, v1: u8, v2: u8) {
+  // #[test_case(0x19, 19)]
+  // #[test_case(0x26, 26)]
+  // #[test_case(0x71, 71)]
+  // fn convert_num_to_decimal(hex_num: u8, dec_num: u8) {
+  //   let result = CPU::convert_num_to_decimal(hex_num);
+  //   assert_eq!(result, dec_num);
+  // }
+
+  // #[test_case(0xA2)]
+  // #[test_case(0x2A)]
+  // #[should_panic]
+  // fn convert_num_to_decimal_panic(value: u8) {
+  //   let result = CPU::convert_num_to_decimal(value);
+  //   assert_eq!(0, result + 1);
+  // }
+
+  #[test_case(0xFFFA, 0xFFFB, random(), random(), random(), random(); "interrupt values")]
+  fn interrupt(lo: u16, hi: u16, v1: u8, v2: u8, sr: u8, pc: u16) {
     let mut cpu = setup_sync(7);
     cpu.memory.set(lo, v1);
     cpu.memory.set(hi, v2);
+    cpu.status_register.set(sr);
+    cpu.program_counter.jump(pc);
+    let pc_ops = pc.to_le_bytes();
     let address = cpu.interrupt(lo, hi);
     assert_eq!(address, u16::from_le_bytes([v1, v2]));
-    assert_eq!(cpu.memory.get_u16(0x1FF), 0x00);
-    assert_eq!(cpu.memory.get_u16(0x1FE), 0x80);
+    assert_eq!(cpu.memory.get_u16(0x1FF), pc_ops[0]);
+    assert_eq!(cpu.memory.get_u16(0x1FE), pc_ops[1]);
     assert_eq!(
       cpu.memory.get_u16(0x1FD),
       cpu.status_register.get_register()
     );
+    assert_eq!(cpu.status_register.is_flag_set(StatusBit::Interrupt), true);
+  }
+
+  // 0xCF is all flags except break and unused set
+  #[test_case(0xCF, random())]
+  fn return_from_interrupt(sr: u8, pc: u16) {
+    let mut cpu = setup_sync(6);
+    cpu.program_counter.jump(pc);
+    let pc_ops = pc.to_le_bytes();
+    cpu.memory.set(0x1FF, pc_ops[0]);
+    cpu.memory.set(0x1FE, pc_ops[1]);
+    cpu.memory.set(0x1FD, sr);
+    cpu.memory.set_stack_pointer(0xFC);
+    cpu.return_from_interrupt();
+    assert_eq!(cpu.program_counter.get(), pc as usize);
+    assert_eq!(cpu.status_register.get_register(), 0xCB);
+    assert_eq!(cpu.status_register.is_flag_set(StatusBit::Interrupt), false);
+  }
+
+  #[test_case(random(), random())]
+  fn aac(value: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.aac(value);
+    let result = value & acc;
+    assert_eq!(cpu.accumulator.get(), result);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      result >= 0x80
+    );
+  }
+
+  #[test_case(random(), random(), random())]
+  fn aax(index: u16, acc: u8, x: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(x);
+    cpu.accumulator.set(acc);
+    cpu.aax(index);
+    assert_eq!(cpu.memory.get_u16(index), x & acc);
+  }
+
+  #[test_case(0x58, 0x46, 1, 0x05, true)]
+  #[test_case(0x12, 0x34, 0, 0x46, false)]
+  #[test_case(0x15, 0x26, 0, 0x41, false)]
+  #[test_case(0x81, 0x92, 0, 0x73, true)]
+  fn decimal_addition(v1: u8, v2: u8, carry: u8, expected: u8, carry_set: bool) {
+    let mut cpu = setup_sync(0);
+    let result = cpu.decimal_addition(v1, v2, carry);
+    assert_eq!(result, expected);
+    assert_eq!(cpu.status_register.is_flag_set(StatusBit::Carry), carry_set);
+  }
+
+  #[test_case(0x46, 0x12, 1, 0x34, true)]
+  #[test_case(0x40, 0x13, 1, 0x27, true)]
+  #[test_case(0x32, 0x02, 0, 0x29, true)]
+  #[test_case(0x12, 0x21, 1, 0x91, false)]
+  #[test_case(0x21, 0x34, 1, 0x87, false)]
+  fn decimal_subtraction(v1: u8, v2: u8, carry: u8, expected: u8, carry_set: bool) {
+    let mut cpu = setup_sync(0);
+    // carries are flipped for subtraction
+    let carry = match carry {
+      1 => 0,
+      0 => 1,
+      _ => panic!(),
+    };
+    let result = cpu.decimal_subtraction(v1, v2, carry);
+    assert_eq!(result, expected);
+    assert_eq!(cpu.status_register.is_flag_set(StatusBit::Carry), carry_set);
   }
 }
