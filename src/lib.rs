@@ -83,10 +83,15 @@ impl CPU {
   /// pins in the meanwhile. This simulates that the cpu will finish its current
   /// instruction when an interrupt comes in, then go off and handle the interrupt.
   fn sync(&mut self) {
+    let mut count: u32 = 0;
     trace!("Completed machine cycle");
     // let b = self.clock_pin.recv().unwrap();
     while !self.clock_pin.try_recv().is_ok() {
       self.check_pins();
+      if count > 65255 * 12 {
+        panic!("Processor deadlock! Restart your processor!");
+      }
+      count += 1;
     }
     // self.check_pins();
     trace!("Starting machine cycle");
@@ -779,13 +784,6 @@ impl CPU {
     self.sync();
   }
 
-  fn convert_num_to_decimal(value: u8) -> std::result::Result<u8, std::num::ParseIntError> {
-    let mut hi_nib = ((value & 0xF0) >> 4).to_string();
-    let lo_nib = (value & 0x0F).to_string();
-    hi_nib.push_str(&lo_nib);
-    u8::from_str_radix(&hi_nib, 10)
-  }
-
   fn decimal_addition(&mut self, acc_val: u8, val: u8, modifier: u8) -> u8 {
     trace!("Decimal addition. Hope this works!");
     let message = "D ADC";
@@ -1154,6 +1152,7 @@ impl CPU {
   pub fn axa(&mut self, index: u16) {
     warn!("AXA called. Something might be borked.");
     let result = self.accumulator.get() & self.x_register.get();
+    self.accumulator.set(result);
     let result = result & 7;
     self.set_u16(index, result);
   }
@@ -2399,6 +2398,13 @@ mod tests {
     assert_eq!(true, true);
   }
 
+  #[test]
+  #[should_panic]
+  fn sync_aborts_if_count_exceeded() {
+    let mut cpu = setup_sync(0);
+    cpu.sync();
+  }
+
   #[test_case(random())]
   fn push_to_stack(value: u8) {
     let mut cpu = setup_sync(1);
@@ -2698,22 +2704,6 @@ mod tests {
     assert_eq!(cpu.status_register.is_flag_set(flag), false);
   }
 
-  // #[test_case(0x19, 19)]
-  // #[test_case(0x26, 26)]
-  // #[test_case(0x71, 71)]
-  // fn convert_num_to_decimal(hex_num: u8, dec_num: u8) {
-  //   let result = CPU::convert_num_to_decimal(hex_num);
-  //   assert_eq!(result, dec_num);
-  // }
-
-  // #[test_case(0xA2)]
-  // #[test_case(0x2A)]
-  // #[should_panic]
-  // fn convert_num_to_decimal_panic(value: u8) {
-  //   let result = CPU::convert_num_to_decimal(value);
-  //   assert_eq!(0, result + 1);
-  // }
-
   #[test_case(0xFFFA, 0xFFFB, random(), random(), random(), random(); "interrupt values")]
   fn interrupt(lo: u16, hi: u16, v1: u8, v2: u8, sr: u8, pc: u16) {
     let mut cpu = setup_sync(7);
@@ -2800,8 +2790,8 @@ mod tests {
     assert_eq!(cpu.memory.get_u16(index), x & acc);
   }
 
-  #[test_case(0x58, 0x46, true, false, 0x9F; "test hex addition")]
-  #[test_case(0x58, 0x46, true, true, 0x05; "test dec addition")]
+  #[test_case(0x58, 0x46, true, false, 0x9F; "hex addition")]
+  #[test_case(0x58, 0x46, true, true, 0x05; "dec addition")]
   fn adc(acc: u8, value: u8, c: bool, d: bool, expected: u8) {
     let mut cpu = setup_sync(0);
     cpu.accumulator.set(acc);
@@ -2813,5 +2803,118 @@ mod tests {
     }
     cpu.adc(value);
     assert_eq!(cpu.accumulator.get(), expected);
+  }
+
+  #[test_case(random(), random())]
+  fn and(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.and(val);
+    assert_eq!(cpu.accumulator.get(), acc & val);
+  }
+
+  #[test_case(random(), random())]
+  fn arr(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.arr(val);
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    let temp = acc & val;
+    assert_eq!(cpu.accumulator.get(), cpu.rotate_right(temp));
+  }
+
+  #[test_case(random())]
+  fn asl(val: u8) {
+    let mut cpu = setup_sync(1);
+    let result = cpu.asl(val);
+    assert_eq!(result, val.wrapping_shl(1));
+  }
+
+  #[test_case(random())]
+  fn asl_accumulator(acc: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.accumulator.set(acc);
+    cpu.asl_accumulator();
+    assert_eq!(cpu.accumulator.get(), acc.wrapping_shl(1));
+  }
+
+  #[test_case(random(), random())]
+  fn asl_zero_page(index: u8, value: u8) {
+    let mut cpu = setup_sync(4);
+    cpu.memory.set_zero_page(index, value);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, index);
+    cpu.asl_zero_page();
+    let result = cpu.memory.get_zero_page(index);
+    assert_eq!(result, value.wrapping_shl(1));
+  }
+
+  #[test_case(random(), random(), random())]
+  fn asl_zero_page_x(index: u8, val: u8, x: u8) {
+    let mut cpu = setup_sync(5);
+    let mod_index = index.wrapping_add(x);
+    cpu.x_register.set(x);
+    cpu.memory.set_zero_page(mod_index, val);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, index);
+    cpu.asl_zero_page_x();
+    let result = cpu.memory.get_zero_page(mod_index);
+    assert_eq!(result, val.wrapping_shl(1));
+  }
+
+  #[test_case(random(), random())]
+  fn asl_absolute(index: u16, val: u8) {
+    let mut cpu = setup_sync(5);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    cpu.memory.set(index, val);
+    cpu.asl_absolute();
+    let result = cpu.memory.get_u16(index);
+    assert_eq!(result, val.wrapping_shl(1));
+  }
+
+  #[test_case(random(), random(), random())]
+  fn asl_absolute_x(index: u16, val: u8, x: u8) {
+    let mut cpu = setup_sync(7);
+    let mod_index = index.wrapping_add(x as u16);
+    let ops = index.to_le_bytes();
+    cpu.x_register.set(x);
+    cpu.memory.set(mod_index, val);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    cpu.asl_absolute_x();
+    let result = cpu.memory.get_u16(mod_index);
+    assert_eq!(result, val.wrapping_shl(1));
+  }
+
+  #[test_case(random(), random())]
+  fn asr(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.asr(val);
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    let temp = acc & val;
+    let result = temp.wrapping_shr(1);
+    assert_eq!(result, cpu.accumulator.get());
+  }
+
+  #[test_case(random(), random())]
+  fn atx(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.atx(val);
+    assert_eq!(cpu.accumulator.get(), acc & val);
+    assert_eq!(cpu.x_register.get(), acc & val);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn axa(acc: u8, x: u8, index: u16) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(x);
+    cpu.accumulator.set(acc);
+    cpu.axa(index);
+    let result = x & acc;
+    let from_mem = cpu.memory.get_u16(index);
+    assert_eq!(cpu.accumulator.get(), result);
+    assert_eq!(from_mem, result & 7);
   }
 }

@@ -80,12 +80,24 @@ impl StatusRegister {
   pub fn handle_v_flag(&mut self, value: u8, message: &str, carry: bool) {
     match carry {
       false => match value > 0x7F {
-        true => self.set_flag(StatusBit::Overflow),
-        false => self.clear_flag(StatusBit::Overflow),
+        true => {
+          trace!("{} setting overflow bit", message);
+          self.set_flag(StatusBit::Overflow);
+        }
+        false => {
+          trace!("{} clearing overflow bit", message);
+          self.clear_flag(StatusBit::Overflow);
+        }
       },
       true => match value > 0x80 {
-        true => self.set_flag(StatusBit::Overflow),
-        false => self.clear_flag(StatusBit::Overflow),
+        true => {
+          trace!("{} setting overflow bit", message);
+          self.set_flag(StatusBit::Overflow);
+        }
+        false => {
+          trace!("{} clearing overflow bit", message);
+          self.clear_flag(StatusBit::Overflow);
+        }
       },
     }
   }
