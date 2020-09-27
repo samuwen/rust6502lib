@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 const BASE: u8 = 2;
 
 /// A 6502 status register with bitmasking implementation.
+#[derive(PartialEq, Eq)]
 pub struct StatusRegister(u8);
 
 impl StatusRegister {

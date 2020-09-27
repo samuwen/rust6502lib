@@ -3,6 +3,7 @@ use log::{debug, trace};
 
 /// The Program Counter for the computer. Keeps track of where the computer's
 /// execution is transpiring.
+#[derive(PartialEq, Eq)]
 pub struct ProgramCounter {
   value: u16,
   start: u16,

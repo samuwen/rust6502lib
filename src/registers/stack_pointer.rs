@@ -9,6 +9,7 @@ const START_INDEX: u8 = 0xFF;
 /// The stack pointer always points at the next free value, so pushing will
 /// return the current value and decrement, while popping will have to
 /// increment before returning the value.
+#[derive(PartialEq, Eq)]
 pub struct StackPointer(u8);
 
 impl StackPointer {

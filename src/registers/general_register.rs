@@ -1,5 +1,6 @@
 use log::{debug, trace};
 /// A generic 6502 register, X Y or A
+#[derive(Eq, PartialEq)]
 pub struct GeneralRegister(u8);
 
 impl GeneralRegister {

@@ -1374,14 +1374,14 @@ impl CPU {
   /// Zero page x variant of DCP
   pub fn dcp_zp_reg(&mut self) {
     trace!("DCP zero page x called");
-    let (index, value) = self.zp_reg("DEC", self.x_register.get());
+    let (index, value) = self.zp_reg("DCP", self.x_register.get());
     self.dcp(index as u16, value);
   }
 
   /// Absolute variant of DCP
   pub fn dcp_absolute(&mut self) {
     trace!("DCP absolute called");
-    let (index, value) = self.absolute("DEC");
+    let (index, value) = self.absolute("DCP");
     self.dcp(index, value);
   }
 
@@ -2274,6 +2274,20 @@ impl CPU {
   }
 }
 
+impl Eq for CPU {}
+
+impl PartialEq for CPU {
+  fn eq(&self, other: &Self) -> bool {
+    let b1 = self.program_counter == other.program_counter;
+    let b2 = self.memory == other.memory;
+    let b3 = self.x_register == other.x_register;
+    let b4 = self.y_register == other.y_register;
+    let b5 = self.accumulator == other.accumulator;
+    let b6 = self.status_register == other.status_register;
+    return b1 && b2 && b3 && b4 && b5 && b6;
+  }
+}
+
 /// Prints pretty output about the status of the CPU.
 impl Display for CPU {
   fn fmt(&self, f: &mut Formatter<'_>) -> Result {
@@ -2916,5 +2930,308 @@ mod tests {
     let from_mem = cpu.memory.get_u16(index);
     assert_eq!(cpu.accumulator.get(), result);
     assert_eq!(from_mem, result & 7);
+  }
+
+  #[test_case(random(), random(), random(), random())]
+  fn axa_absolute_y(acc: u8, x: u8, y: u8, index: u16) {
+    // extra cycle in case of page overflow
+    let mut cpu = setup_sync(4);
+    cpu.accumulator.set(acc);
+    cpu.x_register.set(x);
+    cpu.y_register.set(y);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    let mod_index = index.wrapping_add(y as u16);
+    cpu.axa_absolute_y();
+    let result = x & acc;
+    let from_mem = cpu.memory.get_u16(mod_index);
+    assert_eq!(cpu.accumulator.get(), result);
+    assert_eq!(from_mem, result & 7);
+  }
+
+  #[test_case(random(), random(), random(), random())]
+  fn axa_indirect(acc: u8, x: u8, op: u8, index: u16) {
+    let mut cpu = setup_sync(4);
+    cpu.accumulator.set(acc);
+    cpu.x_register.set(x);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, op);
+    let ops = index.to_le_bytes();
+    let op = op.wrapping_add(x);
+    cpu.memory.set_zero_page(op, ops[0]);
+    cpu.memory.set_zero_page(op.wrapping_add(1), ops[1]);
+    cpu.axa_indirect();
+    let result = x & acc;
+    let from_mem = cpu.memory.get_u16(index);
+    assert_eq!(cpu.accumulator.get(), result);
+    assert_eq!(from_mem, result & 7);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn axs(acc: u8, x: u8, value: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.x_register.set(x);
+    let result = acc & x;
+    let result = result.wrapping_sub(value);
+    cpu.axs(value);
+    assert_eq!(result, cpu.x_register.get());
+  }
+
+  #[test_case(random(), random(); "Test bits randomly")]
+  #[test_case(0xCB, 0x34; "Test zero bit")]
+  fn bit(value: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.bit(value);
+    assert_eq!(
+      (value & acc) == 0,
+      cpu.status_register.is_flag_set(StatusBit::Zero)
+    );
+    assert_eq!(
+      ((value & 0x80) >> 7) == 1,
+      cpu.status_register.is_flag_set(StatusBit::Negative)
+    );
+    assert_eq!(
+      ((value & 0x40) >> 6) == 1,
+      cpu.status_register.is_flag_set(StatusBit::Overflow)
+    );
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bpl(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    match take {
+      true => pc_start += op as u16,
+      false => cpu.status_register.set_flag(StatusBit::Negative),
+    };
+    cpu.bpl();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bmi(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    if take {
+      pc_start += op as u16;
+      cpu.status_register.set_flag(StatusBit::Negative);
+    }
+    cpu.bmi();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bvc(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    match take {
+      true => pc_start += op as u16,
+      false => cpu.status_register.set_flag(StatusBit::Overflow),
+    };
+    cpu.bvc();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bvs(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    if take {
+      pc_start += op as u16;
+      cpu.status_register.set_flag(StatusBit::Overflow);
+    }
+    cpu.bvs();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bcc(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    match take {
+      true => pc_start += op as u16,
+      false => cpu.status_register.set_flag(StatusBit::Carry),
+    };
+    cpu.bcc();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bcs(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    if take {
+      pc_start += op as u16;
+      cpu.status_register.set_flag(StatusBit::Carry);
+    }
+    cpu.bcs();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn bne(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    match take {
+      true => pc_start += op as u16,
+      false => cpu.status_register.set_flag(StatusBit::Zero),
+    };
+    cpu.bne();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(true, 0x05; "Take branch")]
+  #[test_case(false, 0x05; "Do not take branch")]
+  fn beq(take: bool, op: u8) {
+    let mut cpu = setup_sync(2);
+    let mut pc_start = STARTING_MEMORY_BLOCK + 1;
+    cpu.memory.set(pc_start, op);
+    if take {
+      pc_start += op as u16;
+      cpu.status_register.set_flag(StatusBit::Zero);
+    }
+    cpu.beq();
+    assert_eq!(cpu.program_counter.get(), (pc_start as u16) as usize);
+  }
+
+  #[test_case(random())]
+  fn brk(index: u16) {
+    let mut cpu = setup_sync(7);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(0xFFFE, ops[0]);
+    cpu.memory.set(0xFFFF, ops[1]);
+    cpu.brk();
+    assert_eq!(cpu.program_counter.get(), index as usize);
+  }
+
+  #[test_case(random(), random())]
+  fn cmp(value: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.cmp(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      acc >= value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Zero),
+      acc == value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Negative),
+      acc.wrapping_sub(value) >= 0x80
+    );
+  }
+
+  #[test_case(random(), random())]
+  fn cpx(value: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.x_register.set(acc);
+    cpu.cpx(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      acc >= value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Zero),
+      acc == value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Negative),
+      acc.wrapping_sub(value) >= 0x80
+    );
+  }
+
+  #[test_case(random(), random())]
+  fn cpy(value: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.y_register.set(acc);
+    cpu.cpy(value);
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Carry),
+      acc >= value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Zero),
+      acc == value
+    );
+    assert_eq!(
+      cpu.status_register.is_flag_set(StatusBit::Negative),
+      acc.wrapping_sub(value) >= 0x80
+    );
+  }
+
+  #[test_case(StatusBit::Carry, &mut CPU::clc)]
+  #[test_case(StatusBit::Decimal, &mut CPU::cld)]
+  #[test_case(StatusBit::Interrupt, &mut CPU::cli)]
+  #[test_case(StatusBit::Overflow, &mut CPU::clv)]
+  fn clear_flags_tests<F: FnMut(&mut CPU)>(flag: StatusBit, f: &mut F) {
+    let mut cpu = setup_sync(1);
+    cpu.status_register.set_flag(flag);
+    f(&mut cpu);
+    assert_eq!(cpu.status_register.is_flag_set(StatusBit::Carry), false);
+  }
+
+  #[test_case(random(), random())]
+  fn dcp(index: u16, value: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.dcp(index, value);
+    assert_eq!(cpu.memory.get_u16(index), value.wrapping_sub(1));
+  }
+
+  #[test_case(random(), random())]
+  fn dec(index: u16, value: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.dec(index, value);
+    assert_eq!(cpu.memory.get_u16(index), value.wrapping_sub(1));
+  }
+
+  #[test]
+  fn dop() {
+    let mut cpu = setup_sync(1);
+    let base_cpu = setup_sync(1);
+    cpu.dop(0);
+    let result = cpu == base_cpu;
+    assert_eq!(result, true);
+  }
+
+  #[test_case(random(), random())]
+  fn eor(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.eor(val);
+    assert_eq!(cpu.accumulator.get(), acc ^ val);
+  }
+
+  #[test_case(random(), random())]
+  fn inc(index: u16, value: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.inc(index, value);
+    assert_eq!(cpu.memory.get_u16(index), value.wrapping_add(1));
+  }
+
+  #[test_case(random(), random())]
+  fn isc(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.isc(val);
+    let result = acc.wrapping_sub(val.wrapping_add(1));
+    assert_eq!(cpu.accumulator.get(), result);
   }
 }

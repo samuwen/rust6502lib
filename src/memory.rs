@@ -2,7 +2,7 @@ use crate::StackPointer;
 use log::{debug, error, trace};
 
 /// 16 bits worth of screaming fast memory.
-const MEMORY_MAX: usize = 0xFFFF;
+const MEMORY_MAX: usize = 0x10000;
 /// The start block for the stack
 const STACK_MIN: u16 = 0x100;
 /// The end block for the stack
@@ -102,6 +102,18 @@ impl Memory {
   /// Sets our instance of the stack pointer
   pub fn set_stack_pointer(&mut self, val: u8) {
     self.sp.set(val);
+  }
+}
+
+impl Eq for Memory {}
+
+impl PartialEq for Memory {
+  fn eq(&self, other: &Self) -> bool {
+    let i1 = self.mem.iter().map(|x| *x as usize);
+    let i2 = other.mem.iter().map(|x| *x as usize);
+    let s1: usize = i1.sum();
+    let s2: usize = i2.sum();
+    return self.sp == other.sp && s1 == s2;
   }
 }
 
