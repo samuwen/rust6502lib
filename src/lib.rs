@@ -1734,7 +1734,7 @@ impl CPU {
   ///
   /// Takes the value in the accumulator and loads the x register with it.
   pub fn tax(&mut self) {
-    self.x_register.set(self.x_register.get());
+    self.x_register.set(self.accumulator.get());
     self.register_operation(self.x_register.get(), "TAX");
   }
 
@@ -1743,7 +1743,7 @@ impl CPU {
   /// Takes the value in the x register and loads the accumulator with it.
   pub fn txa(&mut self) {
     self.accumulator.set(self.x_register.get());
-    self.register_operation(self.x_register.get(), "TXA");
+    self.register_operation(self.accumulator.get(), "TXA");
   }
 
   /// DEcrement X register
@@ -2576,8 +2576,8 @@ mod tests {
     assert_eq!(index, i_result);
   }
 
-  #[test_case(true, non_wrapping_u8(), 1; "Addition")]
-  #[test_case(true, wrapping_u8(), 2; "Subtraction")]
+  #[test_case(true, non_wrapping_u8(), 2; "Addition")]
+  #[test_case(true, wrapping_u8(), 3; "Subtraction")]
   fn branch(condition: bool, op: u8, sync_count: usize) {
     let mut cpu = setup_sync(sync_count);
     let pc = cpu.program_counter.get();
@@ -2876,7 +2876,7 @@ mod tests {
 
   #[test_case(random(), random())]
   fn asl_absolute(index: u16, val: u8) {
-    let mut cpu = setup_sync(5);
+    let mut cpu = setup_sync(6);
     let ops = index.to_le_bytes();
     cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
     cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
@@ -3001,7 +3001,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bpl(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     match take {
@@ -3015,7 +3015,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bmi(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     if take {
@@ -3029,7 +3029,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bvc(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     match take {
@@ -3043,7 +3043,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bvs(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     if take {
@@ -3057,7 +3057,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bcc(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     match take {
@@ -3071,7 +3071,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bcs(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     if take {
@@ -3085,7 +3085,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn bne(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     match take {
@@ -3099,7 +3099,7 @@ mod tests {
   #[test_case(true, 0x05; "Take branch")]
   #[test_case(false, 0x05; "Do not take branch")]
   fn beq(take: bool, op: u8) {
-    let mut cpu = setup_sync(2);
+    let mut cpu = setup_sync(3);
     let mut pc_start = STARTING_MEMORY_BLOCK + 1;
     cpu.memory.set(pc_start, op);
     if take {
@@ -3233,5 +3233,215 @@ mod tests {
     cpu.isc(val);
     let result = acc.wrapping_sub(val.wrapping_add(1));
     assert_eq!(cpu.accumulator.get(), result);
+  }
+
+  #[test]
+  #[should_panic]
+  fn kil() {
+    let cpu = setup_sync(0);
+    cpu.kil();
+  }
+
+  #[test_case(random())]
+  fn jmp_absolute(index: u16) {
+    let mut cpu = setup_sync(2);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    cpu.jmp_absolute();
+    assert_eq!(cpu.program_counter.get(), index as usize);
+  }
+
+  #[test_case(random(), random())]
+  fn jmp_indirect(index: u16, dest_index: u16) {
+    let mut cpu = setup_sync(4);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    let dest_ops = dest_index.to_le_bytes();
+    cpu.memory.set(index, dest_ops[0]);
+    cpu.memory.set(index.wrapping_add(1), dest_ops[1]);
+    cpu.jmp_indirect();
+    assert_eq!(cpu.program_counter.get(), dest_index as usize);
+  }
+
+  #[test_case(random())]
+  fn jsr(index: u16) {
+    let mut cpu = setup_sync(5);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    cpu.jsr();
+    assert_eq!(cpu.program_counter.get(), index as usize);
+    assert_ne!(cpu.memory.get_stack_pointer().get(), 0xFF);
+  }
+
+  #[test_case(random(), random())]
+  fn lar(val: u8, sp: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.memory.set_stack_pointer(sp);
+    cpu.lar(val);
+    assert_eq!(cpu.accumulator.get(), val & sp);
+    assert_eq!(cpu.memory.get_stack_pointer().get(), val & sp);
+    assert_eq!(cpu.x_register.get(), val & sp);
+  }
+
+  #[test_case(random())]
+  fn lax(val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.lax(val);
+    assert_eq!(cpu.accumulator.get(), val);
+    assert_eq!(cpu.x_register.get(), val);
+  }
+
+  #[test_case(random())]
+  fn lda(val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.lda(val);
+    assert_eq!(cpu.accumulator.get(), val);
+  }
+
+  #[test_case(random())]
+  fn ldx(val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.ldx(val);
+    assert_eq!(cpu.x_register.get(), val);
+  }
+
+  #[test_case(random())]
+  fn ldy(val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.ldy(val);
+    assert_eq!(cpu.y_register.get(), val);
+  }
+
+  #[test_case(random())]
+  fn lsr(val: u8) {
+    let mut cpu = setup_sync(1);
+    let result = cpu.lsr(val);
+    assert_eq!(result, val.wrapping_shr(1));
+  }
+
+  #[test]
+  fn nop() {
+    let mut cpu = setup_sync(1);
+    let base_cpu = setup_sync(1);
+    cpu.nop();
+    let result = cpu == base_cpu;
+    assert_eq!(result, true);
+  }
+
+  #[test_case(random(), random())]
+  fn ora(val: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.ora(val);
+    assert_eq!(cpu.accumulator.get(), val | acc);
+  }
+
+  #[test_case(random())]
+  fn tax(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.accumulator.set(val);
+    cpu.tax();
+    assert_eq!(cpu.x_register.get(), val);
+  }
+
+  #[test_case(random())]
+  fn txa(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(val);
+    cpu.txa();
+    assert_eq!(cpu.accumulator.get(), val);
+  }
+
+  #[test_case(random())]
+  fn dex(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(val);
+    cpu.dex();
+    assert_eq!(cpu.x_register.get(), val.wrapping_sub(1));
+  }
+
+  #[test_case(random())]
+  fn inx(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(val);
+    cpu.inx();
+    assert_eq!(cpu.x_register.get(), val.wrapping_add(1));
+  }
+
+  #[test_case(random())]
+  fn tay(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.accumulator.set(val);
+    cpu.tay();
+    assert_eq!(cpu.y_register.get(), val);
+  }
+
+  #[test_case(random())]
+  fn tya(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.y_register.set(val);
+    cpu.tya();
+    assert_eq!(cpu.accumulator.get(), val);
+  }
+
+  #[test_case(random())]
+  fn dey(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.y_register.set(val);
+    cpu.dey();
+    assert_eq!(cpu.y_register.get(), val.wrapping_sub(1));
+  }
+
+  #[test_case(random())]
+  fn iny(val: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.y_register.set(val);
+    cpu.iny();
+    assert_eq!(cpu.y_register.get(), val.wrapping_add(1));
+  }
+
+  #[test_case(random(), random())]
+  fn rla(val: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    let result = cpu.rotate_left(val);
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    cpu.rla(val);
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    let result = result & acc;
+    assert_eq!(result, cpu.accumulator.get());
+  }
+
+  #[test_case(random())]
+  fn rol(val: u8) {
+    let mut cpu = setup_sync(1);
+    let result = cpu.rol(val);
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    assert_eq!(result, cpu.rotate_left(val));
+  }
+
+  #[test_case(random())]
+  fn ror(val: u8) {
+    let mut cpu = setup_sync(1);
+    let result = cpu.ror(val);
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    assert_eq!(result, cpu.rotate_right(val));
+  }
+
+  #[test_case(0xAB, 0xBC)]
+  fn rra(val: u8, acc: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    let mut result = cpu.rotate_right(val);
+    if cpu.status_register.is_flag_set(StatusBit::Carry) {
+      result = result.wrapping_add(1);
+    }
+    cpu.status_register.clear_flag(StatusBit::Carry);
+    cpu.rra(val);
+    let result = acc.wrapping_add(result);
+    assert_eq!(result, cpu.accumulator.get());
   }
 }
