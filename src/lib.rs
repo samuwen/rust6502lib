@@ -88,7 +88,7 @@ impl CPU {
     // let b = self.clock_pin.recv().unwrap();
     while !self.clock_pin.try_recv().is_ok() {
       self.check_pins();
-      if count > 65255 * 12 {
+      if count > u32::MAX / 150 {
         panic!("Processor deadlock! Restart your processor!");
       }
       count += 1;
@@ -2317,7 +2317,14 @@ mod tests {
     let cpu = CPU::new(rx);
     std::thread::spawn(move || {
       for _ in 0..count {
-        tx.send(true).unwrap();
+        let result = tx.send(true);
+        match result {
+          Err(err) => {
+            println!("{}", err);
+            tx.send(true).unwrap();
+          }
+          Ok(_) => (),
+        }
       }
     });
     cpu
