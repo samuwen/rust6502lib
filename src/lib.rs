@@ -1949,8 +1949,8 @@ impl CPU {
   /// stack and sets the program counter to it.
   pub fn rts(&mut self) {
     debug!("RTS called");
-    let lo = self.pop_from_stack();
     let hi = self.pop_from_stack();
+    let lo = self.pop_from_stack();
     let index = u16::from_le_bytes([lo, hi]) + 1;
     // extra cycle to increment the index
     self.sync();
@@ -2042,7 +2042,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, zero page variant
+  /// Stores the value in the accumulator to memory, zero page variant
   pub fn sta_zero_page(&mut self) {
     debug!("STA zero page called");
     let index = self.zero_page_index("STA");
@@ -2051,7 +2051,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, zero page x variant
+  /// Stores the value in the accumulator to memory, zero page x variant
   pub fn sta_zero_page_x(&mut self) {
     debug!("STA zero page called");
     let index = self.zp_reg_index("STA", self.x_register.get());
@@ -2060,7 +2060,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, absolute variant
+  /// Stores the value in the accumulator to memory, absolute variant
   pub fn sta_absolute(&mut self) {
     debug!("STA absolute called");
     let index = self.absolute_index("STA");
@@ -2069,7 +2069,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, absolute x variant
+  /// Stores the value in the accumulator to memory, absolute x variant
   pub fn sta_absolute_x(&mut self) {
     debug!("STA absolute x called");
     let (index, _) = self.absolute_reg("STA", self.x_register.get());
@@ -2078,7 +2078,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, absolute y variant
+  /// Stores the value in the accumulator to memory, absolute y variant
   pub fn sta_absolute_y(&mut self) {
     debug!("STA absolute y called");
     let (index, _) = self.absolute_reg("STA", self.y_register.get());
@@ -2087,7 +2087,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, indexed x variant
+  /// Stores the value in the accumulator to memory, indexed x variant
   pub fn sta_indexed_x(&mut self) {
     debug!("STA indexed x called");
     let (index, _) = self.indexed_x("STA");
@@ -2096,7 +2096,7 @@ impl CPU {
 
   /// STore Accumulator
   ///
-  /// Stores a value in the accumulator, indexed y variant
+  /// Stores the value in the accumulator to memory, indexed y variant
   pub fn sta_indexed_y(&mut self) {
     debug!("STA indexed y called");
     let (index, _) = self.indexed_y("STA");
@@ -2243,7 +2243,7 @@ impl CPU {
 
   /// STore Y register
   ///
-  /// Takes the value in the x register and stores it in memory.
+  /// Takes the value in the y register and stores it in memory.
   /// Absolute variant
   pub fn sty_absolute(&mut self) {
     let index = self.absolute_index("STY");
@@ -2543,7 +2543,7 @@ mod tests {
   }
 
   #[test_case(random(), non_wrapping_u16(), non_wrapping_u8(), non_wrapping_u8(), 5; "No wrap")]
-  #[test_case(random(), wrapping_u16(), wrapping_u8(), wrapping_u8(), 5; "Wrap")]
+  #[test_case(random(), wrapping_u16(), wrapping_u8(), wrapping_u8(), 6; "Wrap")]
   fn indexed_x(value: u8, index: u16, reg: u8, op: u8, sync_count: usize) {
     let mut cpu = setup_sync(sync_count);
     let pc = cpu.program_counter.get();
@@ -3443,5 +3443,170 @@ mod tests {
     cpu.rra(val);
     let result = acc.wrapping_add(result);
     assert_eq!(result, cpu.accumulator.get());
+  }
+
+  #[test_case(random())]
+  fn rti(index: u16) {
+    let mut cpu = setup_sync(7);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(0x1FF, ops[0]);
+    cpu.memory.set(0x1FE, ops[1]);
+    cpu.memory.set(0x1FD, 0);
+    cpu.memory.set_stack_pointer(0xFC);
+    cpu.rti();
+    assert_eq!(cpu.program_counter.get(), index as usize);
+  }
+
+  #[test_case(random())]
+  fn rts(index: u16) {
+    let mut cpu = setup_sync(6);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(0x1FF, ops[0]);
+    cpu.memory.set(0x1FE, ops[1]);
+    cpu.memory.set_stack_pointer(0xFD);
+    cpu.rts();
+    assert_eq!(cpu.program_counter.get(), index as usize + 1);
+  }
+
+  #[test_case(0x40, 0x13, true, false, 0x2D; "hex subtraction")]
+  #[test_case(0x40, 0x13, true, true, 0x27; "dec subtraction")]
+  fn sbc(acc: u8, val: u8, c: bool, d: bool, expected: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    if c {
+      cpu.status_register.set_flag(StatusBit::Carry);
+    }
+    if d {
+      cpu.status_register.set_flag(StatusBit::Decimal);
+    }
+    cpu.sbc(val);
+    assert_eq!(cpu.accumulator.get(), expected);
+  }
+
+  #[test_case(StatusBit::Carry, &mut CPU::sec)]
+  #[test_case(StatusBit::Decimal, &mut CPU::sed)]
+  #[test_case(StatusBit::Interrupt, &mut CPU::sei)]
+  fn set_flags<F: FnMut(&mut CPU)>(flag: StatusBit, f: &mut F) {
+    let mut cpu = setup_sync(1);
+    f(&mut cpu);
+    assert_eq!(cpu.status_register.is_flag_set(flag), true);
+  }
+
+  #[test_case(random(), random())]
+  fn slo(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.slo(val);
+    let result = cpu.shift_left(val);
+    let result = acc | result;
+    assert_eq!(cpu.accumulator.get(), result);
+  }
+
+  #[test_case(random(), random())]
+  fn sre(acc: u8, val: u8) {
+    let mut cpu = setup_sync(0);
+    cpu.accumulator.set(acc);
+    cpu.sre(val);
+    let result = cpu.shift_right(val);
+    let result = acc ^ result;
+    assert_eq!(cpu.accumulator.get(), result);
+  }
+
+  #[test_case(random(), random())]
+  fn sta_zero_page(index: u8, val: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.accumulator.set(val);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, index);
+    cpu.sta_zero_page();
+    assert_eq!(cpu.memory.get_zero_page(index), val);
+  }
+
+  #[test]
+  fn top() {
+    let mut cpu = setup_sync(1);
+    let cpu2 = setup_sync(0);
+    cpu.top(0);
+    let result = cpu == cpu2;
+    assert_eq!(result, true);
+  }
+
+  #[test_case(random(), random())]
+  fn txs(x: u8, sp: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(x);
+    cpu.memory.set_stack_pointer(sp);
+    cpu.txs();
+    assert_eq!(cpu.memory.get_stack_pointer().get(), x);
+  }
+
+  #[test_case(random(), random())]
+  fn tsx(x: u8, sp: u8) {
+    let mut cpu = setup_sync(1);
+    cpu.x_register.set(x);
+    cpu.memory.set_stack_pointer(sp);
+    cpu.tsx();
+    assert_eq!(cpu.x_register.get(), sp);
+  }
+
+  #[test_case(random())]
+  fn pha(acc: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.accumulator.set(acc);
+    cpu.pha();
+    assert_eq!(cpu.memory.get_u16(0x1FF), acc);
+  }
+
+  #[test_case(random())]
+  fn pla(acc: u8) {
+    let mut cpu = setup_sync(3);
+    cpu.memory.push_to_stack(acc);
+    cpu.pla();
+    assert_eq!(cpu.accumulator.get(), acc);
+  }
+
+  #[test_case(random())]
+  fn php(sr: u8) {
+    let mut cpu = setup_sync(2);
+    cpu.status_register.set(sr);
+    cpu.php();
+    assert_eq!(cpu.memory.get_u16(0x1FF), sr);
+  }
+
+  #[test_case(random())]
+  fn plp(sr: u8) {
+    let mut cpu = setup_sync(3);
+    cpu.memory.push_to_stack(sr);
+    cpu.plp();
+    assert_eq!(cpu.status_register.get_register(), sr);
+  }
+
+  #[test_case(random(), random(), random())]
+  fn stx_zero_page_y(y: u8, x: u8, op: u8) {
+    let mut cpu = setup_sync(3);
+    cpu.y_register.set(y);
+    cpu.x_register.set(x);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, op);
+    let index = op.wrapping_add(y);
+    cpu.memory.set_zero_page(op.wrapping_add(y), index);
+    cpu.stx_zero_page_y();
+    assert_eq!(cpu.memory.get_zero_page(index), x);
+  }
+
+  #[test_case(random(), random())]
+  fn sty_absolute(y: u8, index: u16) {
+    let mut cpu = setup_sync(3);
+    cpu.y_register.set(y);
+    let ops = index.to_le_bytes();
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 1, ops[0]);
+    cpu.memory.set(STARTING_MEMORY_BLOCK + 2, ops[1]);
+    cpu.sty_absolute();
+    assert_eq!(cpu.memory.get_u16(index), y);
+  }
+
+  #[test]
+  #[should_panic]
+  fn xaa() {
+    let mut cpu = setup_sync(0);
+    cpu.xaa();
   }
 }
