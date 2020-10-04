@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
   typ: TokenType,
   value: String,
@@ -16,14 +16,35 @@ impl Token {
     }
   }
 
-  pub fn get(&self) -> &str {
+  pub fn get_value(&self) -> &str {
     &self.value
   }
 }
 
-#[derive(Debug)]
+impl Ord for Token {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.line.cmp(&other.line)
+  }
+}
+
+impl PartialOrd for Token {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Eq for Token {}
+
+impl PartialEq for Token {
+  fn eq(&self, other: &Self) -> bool {
+    self.typ == other.typ && self.value == other.value && self.line == other.line
+  }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TokenType {
   String,
   AddressType,
   Operand,
+  Directive,
 }
