@@ -1,9 +1,20 @@
-#[derive(Debug, Clone)]
+use std::fmt::*;
+
+#[derive(Clone)]
 pub struct Token {
   typ: TokenType,
   value: String,
   line: usize,
   column: usize,
+}
+
+impl std::fmt::Debug for Token {
+  fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    f.debug_struct("Token")
+      .field("value", &self.value)
+      .field("type", &self.typ)
+      .finish()
+  }
 }
 
 impl Token {
@@ -43,8 +54,11 @@ impl PartialEq for Token {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TokenType {
-  String,
-  AddressType,
-  Operand,
+  Assignment,
   Directive,
+  DirectiveValue,
+  Label,
+  Mnemonic,
+  Operand,
+  Value,
 }

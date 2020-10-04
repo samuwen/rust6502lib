@@ -8,7 +8,7 @@ use flexi_logger::*;
 use log::*;
 use state_machine::Factory;
 use std::fs::read_to_string;
-use token::{Token, TokenType};
+use token::Token;
 
 fn main() {
   Logger::with_env_or_str("trace")
@@ -19,15 +19,15 @@ fn main() {
   // let regexs = vec![hash, paren, dollar];
   let file_string = read_to_string("examples/nesgame.a65").expect("Failed to find example file");
   let mut factory = Factory::new();
-  let mut tokens: Vec<Token> = Vec::with_capacity(file_string.len());
-  let mut opcodes: Vec<u8> = Vec::with_capacity(file_string.len());
-  for (i, chunk) in file_string.split("\n").enumerate() {
+  let split = file_string.split("\n");
+  let mut tokens: Vec<Token> = Vec::with_capacity(split.size_hint().0);
+  for (i, chunk) in split.enumerate() {
     // Prune out newlines
     if chunk.len() > 1 {
       let mut result_tokens = factory.run(chunk, i);
-      if result_tokens.len() > 0 {
-        info!("{:?}", result_tokens);
-      }
+      // if result_tokens.len() > 0 {
+      //   info!("{:?}", result_tokens);
+      // }
       tokens.append(&mut result_tokens);
     }
   }
