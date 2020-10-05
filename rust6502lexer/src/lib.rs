@@ -1,99 +1,27 @@
-use crate::utils::char_utils::*;
+mod char_utils;
+pub mod token;
+
+use char_utils::*;
 use std::iter::Peekable;
 use std::str::Chars;
+pub use token::{Token, TokenType};
 
-#[derive(Debug)]
-pub struct Token {
-  token_type: TokenType,
-  line: usize,
-  value: String,
-  column: usize,
-}
-
-impl Token {
-  fn new(token_type: TokenType) -> TokenBuilder {
-    TokenBuilder {
-      token_type: token_type,
-      line: 0,
-      value: String::from(""),
-      column: 0,
-    }
-  }
-
-  pub fn get_type(&self) -> &TokenType {
-    &self.token_type
-  }
-}
-
-struct TokenBuilder {
-  token_type: TokenType,
-  line: usize,
-  value: String,
-  column: usize,
-}
-
-impl TokenBuilder {
-  fn build(self) -> Token {
-    Token {
-      token_type: self.token_type,
-      line: self.line,
-      value: self.value,
-      column: self.column,
-    }
-  }
-
-  fn line(mut self, line: usize) -> TokenBuilder {
-    self.line = line;
-    self
-  }
-
-  fn value(mut self, value: String) -> TokenBuilder {
-    self.value = value;
-    self
-  }
-
-  fn column(mut self, column: usize) -> TokenBuilder {
-    self.column = column;
-    self
-  }
-}
-
-#[derive(Eq, PartialEq, Debug)]
-pub enum TokenType {
-  // Sequences
-  Identifier,
-  Label,
-  Number,
-  String,
-  Command,
-
-  // Operators
-  Assignment,
-  Hash,
-  LoByte,
-  HiByte,
-  Comma,
-  OParen,
-  CParen,
-
-  // End of input
-  EndOfInput,
-}
-
-impl TokenType {
-  fn from_ch(ch: char) -> TokenType {
-    match ch {
-      '=' => TokenType::Assignment,
-      '#' => TokenType::Hash,
-      '<' => TokenType::LoByte,
-      '>' => TokenType::HiByte,
-      '(' => TokenType::OParen,
-      ')' => TokenType::CParen,
-      _ => TokenType::Comma,
-    }
-  }
-}
-
+/// A 6502 ca65 Lexer
+///
+/// Takes in a string and will output Token objects containing
+/// line info, column info, and token type info.
+///
+/// # Example
+/// Basic usage:
+/// ```
+/// use rust6502lexer::{Lexer, TokenType};
+///
+/// let test_string = String::from("a + b");
+/// let mut lexer = Lexer::new(&test_string);
+/// let token = lexer.next_token();
+/// assert_eq!(token.get_type(), &TokenType::Identifier);
+/// assert_eq!(token.get_value(), "a");
+/// ```
 pub struct Lexer<'l> {
   text: Box<Peekable<Chars<'l>>>,
   line: usize,
@@ -101,9 +29,21 @@ pub struct Lexer<'l> {
 }
 
 impl<'l> Lexer<'l> {
-  pub fn new(input: Box<Peekable<Chars<'l>>>) -> Lexer<'l> {
+  /// Creates a new lexer instance with the string to be lexed.
+  ///
+  /// Accepts a string and stores it as an iterator so that it is
+  /// easy to invoke the next token. Starts everything at zero.
+  ///
+  /// # Examples
+  /// ```
+  /// use rust6502lexer::Lexer;
+  ///
+  /// let lexer = Lexer::new(&String::from("hi"));
+  /// ```
+  pub fn new(input: &'l String) -> Lexer<'l> {
+    let text = Box::new(input.chars().peekable());
     Lexer {
-      text: input,
+      text: text,
       line: 0,
       column: 0,
     }

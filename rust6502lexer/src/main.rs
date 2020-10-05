@@ -1,9 +1,6 @@
-mod lexer;
-mod utils;
-
 use flexi_logger::*;
-use lexer::{Lexer, TokenType};
-use log::*;
+use log::debug;
+use rust6502lexer::{Lexer, TokenType};
 use std::fs::read_to_string;
 
 fn main() {
@@ -13,7 +10,7 @@ fn main() {
     .start()
     .unwrap();
   let file_string = read_to_string("examples/nesgame.a65").expect("Failed to find example file");
-  let mut lexer = Lexer::new(Box::new(file_string.chars().peekable()));
+  let mut lexer = Lexer::new(&file_string);
   loop {
     let token = lexer.next_token();
     debug!("{:?}", token);
