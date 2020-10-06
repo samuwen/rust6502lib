@@ -234,7 +234,7 @@ impl CPU {
   /// http://6502.org/tutorials/6502opcodes.html
   /// Illegal opcodes were built and implemented based off the information at
   /// http://nesdev.com/undocumented_opcodes.txt
-  pub fn run(&mut self, program: Vec<u8>, start: Option<u16>) -> bool {
+  pub fn run(&mut self, program: Vec<u8>, start: Option<u16>) {
     let block = match start {
       Some(v) => v,
       None => STARTING_MEMORY_BLOCK,
@@ -502,7 +502,6 @@ impl CPU {
         0xFF => self.absolute_x_cb("ISC", &mut Self::isc),
       }
     }
-    return false;
   }
 
   /*
