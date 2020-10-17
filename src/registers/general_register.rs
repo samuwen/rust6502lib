@@ -10,7 +10,7 @@ impl GeneralRegister {
     GeneralRegister(0)
   }
 
-  ///  Rests the register value to 0
+  ///  Resets the register value to 0
   pub fn reset(&mut self) {
     debug!("Resetting a general register");
     self.0 = 0;
